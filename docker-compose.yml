@@ -46,6 +46,9 @@ services:
     environment:
       PROXY_UPSTREAM: ${HAPI_BASE_UPSTREAM}
       PROXY_OUTWARD_URL: ${CLINICAL_ORDERS_FHIR_URL}
+      # Base URL HAPI advertises in self-links (must equal its server_address);
+      # the sentinel default matches HAPI's default when fronted by this proxy.
+      PROXY_INTERNAL_BASE: ${PROXY_INTERNAL_BASE:-http://localhost:8090/fhir}
       NGINX_ENVSUBST_FILTER: "PROXY_"
     volumes:
       - ./clinical-orders/clinical-orders-proxy.conf.template:/etc/nginx/templates/default.conf.template:ro
@@ -67,6 +70,9 @@ services:
       # Canonical registry URL — the SAME value the seed bakes into stored
       # references (__REGISTRY_URL__), so self-links and cross-references agree.
       PROXY_OUTWARD_URL: ${REGISTRY_URL}
+      # Base URL HAPI advertises in self-links (must equal its server_address);
+      # the sentinel default matches HAPI's default when fronted by this proxy.
+      PROXY_INTERNAL_BASE: ${PROXY_INTERNAL_BASE:-http://localhost:8090/fhir}
       NGINX_ENVSUBST_FILTER: "PROXY_"
     volumes:
       - ./registry/registry-proxy.conf.template:/etc/nginx/templates/default.conf.template:ro
@@ -145,11 +151,15 @@ services:
       AUTH_DISCOVERY_URL: ${AUTH_SERVER_URL}/realms/${AUTH_SERVER_REALM}/.well-known/openid-configuration
       OPA_URL: http://opa:8181
       JWKS_UPSTREAM: ${JWKS_UPSTREAM}
+      # Optional Basic auth toward the backend FHIR service ("user:pass"); empty
+      # disables it (umzh-backend-basic-auth plugin). Resolved by apisix.yaml.
+      BACKEND_FHIR_BASIC_AUTH: ${BACKEND_FHIR_BASIC_AUTH:-}
     volumes:
       - ./clinical-orders/apisix/config.yaml:/usr/local/apisix/conf/config.yaml:ro
       - ./clinical-orders/apisix/apisix.yaml:/usr/local/apisix/conf/apisix.yaml:ro
       - ./clinical-orders/apisix/umzh-capability-guard.lua:/usr/local/apisix/apisix/plugins/umzh-capability-guard.lua:ro
       - ./clinical-orders/apisix/umzh-task-requester-inject.lua:/usr/local/apisix/apisix/plugins/umzh-task-requester-inject.lua:ro
+      - ./clinical-orders/apisix/umzh-backend-basic-auth.lua:/usr/local/apisix/apisix/plugins/umzh-backend-basic-auth.lua:ro
     ports:
       - '${EXTERNAL_GATEWAY_PORT}:9080'
     extra_hosts:

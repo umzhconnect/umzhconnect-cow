@@ -46,6 +46,11 @@ spec:
                 configMapKeyRef:
                   name: registry-urls
                   key: REGISTRY_URL
+            # Base URL HAPI advertises in self-links — MUST equal the base HAPI's
+            # FHIR_SERVER_ADDRESS (hapi-fhir/hapi-fhir.yaml); the registry proxy
+            # fronts the SAME base HAPI, so it is the same value.
+            - name: PROXY_INTERNAL_BASE
+              value: https://hapi-fhir.dev.umzhc.io.usz.ch/fhir
             # Only substitute PROXY_* so nginx's own $host/$1 are left intact.
             - name: NGINX_ENVSUBST_FILTER
               value: PROXY_

@@ -16,9 +16,13 @@
 # policy; the base HAPI (reached by the seed Job, not through this proxy) stays
 # writable so it can be repopulated. Everything else is denied by `location /`.
 #
-# Host values (${PROXY_UPSTREAM}, ${PROXY_OUTWARD_URL}) come from the environment
-# (.env for compose; Deployment env for k8s). The partition name is structural
-# and stays literal here.
+# Host values (${PROXY_UPSTREAM}, ${PROXY_OUTWARD_URL}, ${PROXY_INTERNAL_BASE})
+# come from the environment (.env for compose; Deployment env for k8s).
+# PROXY_INTERNAL_BASE is the base URL HAPI advertises in self-links (its
+# server_address / FHIR_SERVER_ADDRESS), defaulting to the sentinel
+# http://localhost:8090/fhir; the rewrites below key off it, so it MUST match
+# whatever HAPI actually emits. The partition name is structural and stays
+# literal here.
 # =============================================================================
 upstream hapi_base { server ${PROXY_UPSTREAM}; }
 
@@ -44,14 +48,16 @@ server {
 
         sub_filter_once  off;
         sub_filter_types *;
-        # HAPI builds self-links from server_address (http://localhost:8090/fhir)
-        # + partition; rewrite that to the partition-less outward base URL.
-        sub_filter "http://localhost:8090/fhir/registry/" "${PROXY_OUTWARD_URL}/fhir/";
+        # HAPI builds self-links from its server_address (${PROXY_INTERNAL_BASE})
+        # + partition; rewrite that host+partition to the partition-less outward
+        # base URL. The second rule strips the partition from any remaining
+        # relative occurrence.
+        sub_filter "${PROXY_INTERNAL_BASE}/registry/" "${PROXY_OUTWARD_URL}/fhir/";
         sub_filter "/fhir/registry/" "/fhir/";
 
         # sub_filter only touches the body — also fix the Location header and drop
         # the duplicate Content-Location (harmless here since writes are blocked).
-        proxy_redirect    "http://localhost:8090/fhir/registry/" "${PROXY_OUTWARD_URL}/fhir/";
+        proxy_redirect    "${PROXY_INTERNAL_BASE}/registry/" "${PROXY_OUTWARD_URL}/fhir/";
         proxy_hide_header Content-Location;
     }
 

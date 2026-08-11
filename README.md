@@ -78,8 +78,15 @@ partition back out of response bodies (`sub_filter`) **and** the `Location`
 header (`proxy_redirect`); the duplicate `Content-Location` header is dropped.
 The proxy config is the shared `<service>/<service>-proxy.conf.template`, rendered
 at container start by the nginx image's built-in envsubst from `PROXY_UPSTREAM`
-(base host:port = `HAPI_BASE_UPSTREAM`) and `PROXY_OUTWARD_URL` (= `*_FHIR_URL`,
-the outward base the proxy advertises — keep it equal to the reachable host:port).
+(base host:port = `HAPI_BASE_UPSTREAM`), `PROXY_OUTWARD_URL` (= `*_FHIR_URL`, the
+outward base the proxy advertises — keep it equal to the reachable host:port), and
+`PROXY_INTERNAL_BASE` (the base URL HAPI stamps into self-links, i.e. its
+`server_address`/`FHIR_SERVER_ADDRESS`). The rewrites key off `PROXY_INTERNAL_BASE`,
+so it **must** equal whatever HAPI advertises: leave the sentinel default
+(`http://localhost:8090/fhir`) when HAPI is fronted only by these proxies, and set
+it to the base's real advertised URL when the base is *also* exposed directly (e.g.
+via `hapi-fhir-ingress`) — otherwise the host is stripped of its partition but not
+rewritten to the outward URL.
 
 ```bash
 curl http://localhost:9084/fhir/Organization        # registry, no partition in URL
