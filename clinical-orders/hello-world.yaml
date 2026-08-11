@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-world
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hello-world
+  template:
+    metadata:
+      labels:
+        app: hello-world
+    spec:
+      # Satisfy the cluster's "restricted" Pod Security Standard.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: hello-world
+          # Official busybox includes the httpd applet (alpine's base busybox
+          # does not — it lives in busybox-extras, which needs a root apk add).
+          image: busybox:1.36
+          # Serve from /tmp — a non-root user cannot create dirs at the root.
+          # The ingress forwards the literal '/hello-world' path (no rewrite-target,
+          # which would be ingress-wide and clobber the '/fhir' path), so serve the
+          # body both at '/' (index.html) and at '/hello-world'.
+          command:
+            - sh
+            - -c
+            - "mkdir -p /tmp/www && printf 'hello world\\n' | tee /tmp/www/index.html > /tmp/www/hello-world && httpd -f -p 8080 -h /tmp/www"
+          ports:
+            - containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 32Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-world-service
+spec:
+  selector:
+    app: hello-world
+  ports:
+    - port: 80
+      targetPort: 8080

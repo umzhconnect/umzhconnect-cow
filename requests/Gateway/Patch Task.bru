@@ -1,0 +1,28 @@
+meta {
+  name: Patch Task
+  type: http
+  seq: 4
+}
+
+patch {
+  url: {{gatewayUrl}}/fhir/Task/{{taskId}}
+  body: json
+}
+
+headers {
+  Authorization: Bearer {{accessToken}}
+  Content-Type: application/json-patch+json
+}
+
+body:json {
+  [
+    { "op": "add", "path": "/businessStatus", "value": { "text": "received" } }
+  ]
+}
+
+docs {
+  JSON-Patch a Task (OPA Rule 1d: system/Task.u scope AND owner == your org).
+  Only input / owner / focus / businessStatus are patchable; other paths (e.g.
+  /status) are rejected 400 by capability-guard. Run "Create Task" first to set
+  {{taskId}}.
+}

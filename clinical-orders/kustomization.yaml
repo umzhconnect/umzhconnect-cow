@@ -1,0 +1,33 @@
+namespace: clinical-orders
+
+resources:
+  - ns-clinical-orders.yaml
+  - hello-world.yaml
+  - clinical-orders-ingress.yaml
+  - apisix-external.yaml
+  - clinical-orders-proxy.yaml
+  - partition-init.yaml
+
+# Generate ConfigMaps from the SHARED files colocated here (the same files docker
+# compose uses): the proxy nginx template (mounted under /etc/nginx/templates/ for
+# the nginx image to render) and the partition-init script for the Job.
+configMapGenerator:
+  - name: clinical-orders-proxy-tpl
+    files:
+      - default.conf.template=clinical-orders-proxy.conf.template
+  - name: clinical-orders-init
+    files:
+      - create-partition.sh
+  # APISIX external gateway config (data-plane + routes) from apisix/*.
+  - name: apisix-external-config
+    files:
+      - config.yaml=apisix/config.yaml
+      - apisix.yaml=apisix/apisix.yaml
+  # Custom APISIX plugins (mounted into the plugin dir).
+  - name: apisix-plugins
+    files:
+      - umzh-capability-guard.lua=apisix/umzh-capability-guard.lua
+      - umzh-task-requester-inject.lua=apisix/umzh-task-requester-inject.lua
+
+generatorOptions:
+  disableNameSuffixHash: true

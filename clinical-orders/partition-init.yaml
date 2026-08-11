@@ -1,0 +1,47 @@
+# =============================================================================
+# clinical-orders-init — one-shot Job (clinical-orders namespace) that creates
+# this party's 'clinical-orders' data partition on the base HAPI (left empty).
+# Runs the SHARED create-partition.sh colocated here (the same file docker
+# compose mounts), generated into the `clinical-orders-init` ConfigMap by
+# kustomize. Targets the base HAPI cross-namespace via its FQDN.
+# =============================================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: clinical-orders-init
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app: clinical-orders-init
+    spec:
+      restartPolicy: OnFailure
+      # Satisfy the cluster's "restricted" Pod Security Standard. curlimages/curl
+      # ships curl (+ busybox sh/sed/grep) and runs as non-root — no root-only
+      # `apk add` needed.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 100
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: init
+          image: curlimages/curl:8.11.1
+          command: ["sh", "/init/create-partition.sh"]
+          env:
+            - name: FHIR_BASE
+              value: http://hapi-fhir-service.hapi-fhir.svc.cluster.local:8080/fhir
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: init
+              mountPath: /init
+      volumes:
+        - name: init
+          configMap:
+            name: clinical-orders-init
+            defaultMode: 0755

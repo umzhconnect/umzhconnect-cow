@@ -1,0 +1,19 @@
+meta {
+  name: List Tasks
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{gatewayUrl}}/fhir/Task
+}
+
+headers {
+  Authorization: Bearer {{accessToken}}
+}
+
+docs {
+  Search Tasks. The gateway injects ?requester=<your org> from the token, so the
+  result is only the Tasks this party requested. Needs system/Task.s scope.
+  Run the Auth folder first to populate {{accessToken}}.
+}

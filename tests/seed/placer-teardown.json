@@ -1,0 +1,10 @@
+{
+  "resourceType": "Bundle",
+  "type": "transaction",
+  "entry": [
+    { "request": { "method": "DELETE", "url": "Consent/consent-e2e" } },
+    { "request": { "method": "DELETE", "url": "ServiceRequest/sr-e2e" } },
+    { "request": { "method": "DELETE", "url": "Patient/pat-e2e" } },
+    { "request": { "method": "DELETE", "url": "Task?identifier=urn:umzhc:test|e2e" } }
+  ]
+}

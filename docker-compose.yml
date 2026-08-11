@@ -1,0 +1,206 @@
+# =============================================================================
+# umzhconnect-cow — everything ONE hospital runs to join the UMZH Connect
+# ecosystem. Shared infrastructure (auth server, mCSD registry, the partner
+# itself) is external and configured via .env — never deployed here.
+#
+# This deployment is self-contained: the external gateway (config + plugins), the
+# OPA policies (opa/policies/), and the key-custodian (key-custodian/) all live in
+# this repo. Each service owns and renders its own env-specific config: the
+# nginx-based proxies and the nginx self-link rewriter self-render via the nginx
+# image's envsubst. OPA loads a static data document (opa/opa-config.json) — no
+# render step, since it has no variables to substitute.
+#
+#   keys/gen-keys.sh l2   # once — generate this party's L2 signing key
+#   cp .env.example .env  &&  edit  &&  docker compose up -d --build
+# =============================================================================
+
+services:
+  # ── HAPI FHIR — this party's clinical data store (managed DB backend) ────────
+  hapi-fhir:
+    image: hapiproject/hapi:v7.4.0
+    container_name: party-hapi-fhir
+    environment:
+      SPRING_CONFIG_LOCATION: file:///app/config/application.yaml
+      # Managed (external) Postgres — resolved by application.yaml placeholders.
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ${DB_NAME}
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - ./hapi-fhir/application.yaml:/app/config/application.yaml:ro
+    ports:
+      - '${HAPI_PORT}:8080'
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - party-net
+
+  # ── clinical-orders FHIR proxy — outward, partition-less endpoint ───────────
+  # Uses the SAME clinical-orders/clinical-orders-proxy.conf.template as k8s. The
+  # nginx image renders /etc/nginx/templates/*.template at start via envsubst,
+  # substituting only PROXY_* (so nginx's own $host/$1 survive).
+  clinical-orders-fhir:
+    image: nginx:alpine
+    container_name: party-clinical-orders-fhir
+    environment:
+      PROXY_UPSTREAM: ${HAPI_BASE_UPSTREAM}
+      PROXY_OUTWARD_URL: ${CLINICAL_ORDERS_FHIR_URL}
+      NGINX_ENVSUBST_FILTER: "PROXY_"
+    volumes:
+      - ./clinical-orders/clinical-orders-proxy.conf.template:/etc/nginx/templates/default.conf.template:ro
+    ports:
+      - '${CLINICAL_ORDERS_FHIR_PORT}:8080'
+    depends_on:
+      hapi-fhir:
+        condition: service_started
+    networks:
+      - party-net
+
+  # ── registry FHIR proxy — outward, partition-less mCSD endpoint ─────────────
+  # Uses the SAME registry/registry-proxy.conf.template as k8s (see above).
+  registry-fhir:
+    image: nginx:alpine
+    container_name: party-registry-fhir
+    environment:
+      PROXY_UPSTREAM: ${HAPI_BASE_UPSTREAM}
+      # Canonical registry URL — the SAME value the seed bakes into stored
+      # references (__REGISTRY_URL__), so self-links and cross-references agree.
+      PROXY_OUTWARD_URL: ${REGISTRY_URL}
+      NGINX_ENVSUBST_FILTER: "PROXY_"
+    volumes:
+      - ./registry/registry-proxy.conf.template:/etc/nginx/templates/default.conf.template:ro
+    ports:
+      - '${REGISTRY_FHIR_PORT}:8080'
+    depends_on:
+      hapi-fhir:
+        condition: service_started
+    networks:
+      - party-net
+
+  # ── OPA — consent / fhirContext policy engine ───────────────────────────────
+  opa:
+    image: openpolicyagent/opa:0.70.0
+    platform: linux/amd64
+    container_name: party-opa
+    command:
+      - run
+      - --server
+      - --addr=0.0.0.0:8181
+      - --log-level=info
+      - /policies
+      - /config/opa-config.json
+    volumes:
+      - ./opa/policies:/policies:ro
+      # Static OPA data document (fhir_base). No render step — the file has no
+      # variables to substitute.
+      - ./opa/opa-config.json:/config/opa-config.json:ro
+    ports:
+      - '${OPA_PORT}:8181'
+    networks:
+      party-net:
+        # APISIX templates reference this upstream as opa-${PARTY}.
+        aliases:
+          - opa-${PARTY}
+
+  # ── Key Custodian — holds this party's L2 key; signs assertions + serves JWKS ─
+  key-custodian:
+    build:
+      context: ./key-custodian
+      dockerfile: Dockerfile
+    container_name: party-key-custodian
+    environment:
+      PARTY: ${PARTY}
+      CLIENT_ID: ${L2_CLIENT_ID}
+      KID: ${L2_KID}
+      # Default assertion audience = the auth server's advertised issuer endpoint.
+      KEYCLOAK_AUDIENCE: ${AUTH_SERVER_PUBLIC_URL}/realms/${AUTH_SERVER_REALM}/protocol/openid-connect/token
+    volumes:
+      - ./keys/l2.key:/keys/private.key:ro
+      - ./keys/l2.jwks.json:/keys/jwks.json:ro
+    ports:
+      - '${KEY_CUSTODIAN_PORT}:8000'
+    networks:
+      party-net:
+        # APISIX external template references this upstream as key-custodian-${PARTY}.
+        aliases:
+          - key-custodian-${PARTY}
+
+  # ── External gateway (APISIX) — JWT auth + OPA policy in front of the ───────
+  # clinical-orders FHIR proxy. Runs the SAME standalone config as the k8s
+  # clinical-orders gateway (clinical-orders/apisix/*): APISIX loads apisix.yaml
+  # directly, resolves ${{AUTH_DISCOVERY_URL}} / ${{OPA_URL}} / ${{JWKS_UPSTREAM}}
+  # from the env below, and loads the two custom plugins mounted into its plugin
+  # dir (umzh-capability-guard, umzh-task-requester-inject). It mirrors the
+  # sandbox's public external route surface: /jwks.json, Task list/create/update,
+  # ServiceRequest search, and FHIR read-by-id. (Only the external gateway is run
+  # here; the internal gateway has been dropped.)
+  #
+  #   :EXTERNAL_GATEWAY_PORT → clinical-orders-fhir:8080 → hapi-fhir (clinical-orders)
+  #   /jwks.json             → key-custodian:8000
+  apisix-external:
+    image: apache/apisix:3.9.0-debian
+    container_name: party-apisix-external
+    environment:
+      AUTH_DISCOVERY_URL: ${AUTH_SERVER_URL}/realms/${AUTH_SERVER_REALM}/.well-known/openid-configuration
+      OPA_URL: http://opa:8181
+      JWKS_UPSTREAM: ${JWKS_UPSTREAM}
+    volumes:
+      - ./clinical-orders/apisix/config.yaml:/usr/local/apisix/conf/config.yaml:ro
+      - ./clinical-orders/apisix/apisix.yaml:/usr/local/apisix/conf/apisix.yaml:ro
+      - ./clinical-orders/apisix/umzh-capability-guard.lua:/usr/local/apisix/apisix/plugins/umzh-capability-guard.lua:ro
+      - ./clinical-orders/apisix/umzh-task-requester-inject.lua:/usr/local/apisix/apisix/plugins/umzh-task-requester-inject.lua:ro
+    ports:
+      - '${EXTERNAL_GATEWAY_PORT}:9080'
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      clinical-orders-fhir:
+        condition: service_started
+      opa:
+        condition: service_started
+      key-custodian:
+        condition: service_started
+    networks:
+      - party-net
+
+  # ── One-shot: create this party's clinical-orders partition (owned by that ──
+  # service; left empty — records arrive at runtime through the proxy).
+  clinical-orders-init:
+    image: alpine:3.19
+    container_name: party-clinical-orders-init
+    environment:
+      FHIR_BASE: http://hapi-fhir:8080/fhir
+    entrypoint: ["/bin/sh", "-c", "apk add --no-cache curl >/dev/null && sh /init/create-partition.sh"]
+    volumes:
+      - ./clinical-orders/create-partition.sh:/init/create-partition.sh:ro
+    depends_on:
+      hapi-fhir:
+        condition: service_started
+    networks:
+      - party-net
+
+  # ── One-shot: create the registry partition + merge the mCSD directory ──────
+  # Owned by the registry service; script + bundle live in ./registry.
+  registry-seed:
+    image: alpine:3.19
+    container_name: party-registry-seed
+    environment:
+      OWN_EXTERNAL_URL: ${OWN_EXTERNAL_URL}
+      PARTNER_EXTERNAL_URL: ${PARTNER_EXTERNAL_URL}
+      REGISTRY_URL: ${REGISTRY_URL}
+      FHIR_BASE: http://hapi-fhir:8080/fhir
+      REGISTRY_BUNDLE: /seed/registry-bundle.json
+    entrypoint: ["/bin/sh", "-c", "apk add --no-cache curl >/dev/null && sh /seed/seed-registry.sh"]
+    volumes:
+      - ./registry/seed-registry.sh:/seed/seed-registry.sh:ro
+      - ./registry/registry-bundle.json:/seed/registry-bundle.json:ro
+    depends_on:
+      hapi-fhir:
+        condition: service_started
+    networks:
+      - party-net
+
+networks:
+  party-net:
+    driver: bridge

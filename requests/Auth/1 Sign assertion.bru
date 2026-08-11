@@ -1,0 +1,32 @@
+meta {
+  name: 1 Sign assertion
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{custodianUrl}}/sign
+  body: json
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "audience": "{{kcUrl}}/realms/{{realm}}/protocol/openid-connect/token"
+  }
+}
+
+script:post-response {
+  if (res.body && res.body.assertion) {
+    bru.setEnvVar("assertion", res.body.assertion);
+  }
+}
+
+docs {
+  Step 1 of the L2 flow: ask this node's key custodian to mint a signed
+  private_key_jwt client assertion (aud = the auth server's token endpoint).
+  The assertion is saved to the `assertion` env var for step 2.
+}

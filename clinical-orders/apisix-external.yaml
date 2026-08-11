@@ -1,0 +1,120 @@
+# =============================================================================
+# apisix-external — the clinical-orders external API gateway.
+#
+# Sits between the ingress and the clinical-orders-fhir proxy and enforces:
+#   • authentication — openid-connect (bearer JWT validated against the auth
+#     server's JWKS/discovery)
+#   • authorization  — the opa plugin (consent / fhirContext policy)
+# then forwards /fhir/* to the clinical-orders-fhir proxy (which maps it onto the
+# base HAPI 'clinical-orders' partition).
+#
+#   ingress → apisix-external:9080 → clinical-orders-fhir:8080 → base HAPI
+#
+# The auth-server and policy-server URLs come from the apisix-gateway-config
+# ConfigMap; APISIX resolves the ${{ENV}} references in apisix.yaml at load time.
+# APISIX runs in standalone (data_plane, yaml) mode as the non-root 'apisix' user
+# (UID 636), satisfying the namespace's "restricted" Pod Security Standard.
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: apisix-gateway-config
+data:
+  # ↓ Auth server OIDC discovery document (the gateway validates bearer JWTs
+  #   against its JWKS). e.g. https://auth.umzhc.io.usz.ch/realms/umzh-connect/.well-known/openid-configuration
+  AUTH_DISCOVERY_URL: "https://REPLACE_AUTH_SERVER/realms/umzh-connect/.well-known/openid-configuration"
+  # ↓ Policy (OPA) server base URL. Point at wherever OPA runs; it is not
+  #   deployed by this folder. e.g. http://opa.opa.svc.cluster.local:8181
+  OPA_URL: "http://REPLACE_OPA_HOST:8181"
+  # ↓ The party's key custodian / JWKS host:port. The public /jwks.json route
+  #   proxies here so partner IdPs verify our private_key_jwt assertions at this
+  #   gateway's same-origin URL. Not deployed by this folder.
+  #   e.g. key-custodian.clinical-orders.svc.cluster.local:8000
+  JWKS_UPSTREAM: "REPLACE_JWKS_HOST:8000"
+# The apisix-external-config ConfigMap (config.yaml + apisix.yaml) is generated
+# by kustomize from apisix/config.yaml + apisix/apisix.yaml (configMapGenerator).
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apisix-external
+  labels:
+    app: apisix-external
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: apisix-external
+  template:
+    metadata:
+      labels:
+        app: apisix-external
+    spec:
+      # "restricted" PSS — the apache/apisix image runs as UID 636 by default.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 636
+        runAsGroup: 636
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: apisix
+          image: apache/apisix:3.9.0-debian
+          # Auth / policy URLs → env; apisix.yaml resolves them via ${{...}}.
+          envFrom:
+            - configMapRef:
+                name: apisix-gateway-config
+          ports:
+            - containerPort: 9080
+          # subPath keeps /usr/local/apisix/conf writable (APISIX generates
+          # nginx.conf there at startup); only the two files are overlaid.
+          volumeMounts:
+            - name: config
+              mountPath: /usr/local/apisix/conf/config.yaml
+              subPath: config.yaml
+            - name: config
+              mountPath: /usr/local/apisix/conf/apisix.yaml
+              subPath: apisix.yaml
+            - name: plugins
+              mountPath: /usr/local/apisix/apisix/plugins/umzh-capability-guard.lua
+              subPath: umzh-capability-guard.lua
+            - name: plugins
+              mountPath: /usr/local/apisix/apisix/plugins/umzh-task-requester-inject.lua
+              subPath: umzh-task-requester-inject.lua
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 9080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      volumes:
+        - name: config
+          configMap:
+            name: apisix-external-config
+        - name: plugins
+          configMap:
+            name: apisix-plugins
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: apisix-external
+  labels:
+    app: apisix-external
+spec:
+  selector:
+    app: apisix-external
+  ports:
+    - port: 9080
+      targetPort: 9080
