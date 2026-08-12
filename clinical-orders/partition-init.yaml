@@ -32,7 +32,7 @@ spec:
           command: ["sh", "/init/create-partition.sh"]
           env:
             - name: FHIR_BASE
-              value: http://hapi-fhir-service.hapi-fhir.svc.cluster.local:8080/fhir
+              value: http://hapi-fhir.hapi-fhir.svc.cluster.local:8080/fhir
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

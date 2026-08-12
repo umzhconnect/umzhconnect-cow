@@ -16,7 +16,7 @@ spec:
             path: '/hello-world'
             backend:
               service:
-                name: hello-world-service
+                name: hello-world
                 port:
                   number: 80
           # Outward-facing FHIR → APISIX external gateway (JWT + OPA) → the

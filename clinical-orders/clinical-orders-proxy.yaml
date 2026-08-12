@@ -39,7 +39,7 @@ spec:
           env:
             # Host values (the k8s equivalents of the compose .env entries).
             - name: PROXY_UPSTREAM
-              value: hapi-fhir-service.hapi-fhir.svc.cluster.local:8080
+              value: hapi-fhir.hapi-fhir.svc.cluster.local:8080
             - name: PROXY_OUTWARD_URL
               value: https://clinical-orders.dev.umzhc.io.usz.ch
             # Base URL HAPI advertises in self-links — MUST equal the base HAPI's

@@ -1,9 +1,9 @@
 namespace: clinical-orders
 
 resources:
-  - ns-clinical-orders.yaml
+  - ns.yaml
   - hello-world.yaml
-  - clinical-orders-ingress.yaml
+  - ingress.yaml
   - apisix-external.yaml
   - clinical-orders-proxy.yaml
   - partition-init.yaml

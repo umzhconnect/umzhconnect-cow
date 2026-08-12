@@ -26,7 +26,7 @@ data:
   opa-config.json: |
     {
       "config": {
-        "fhir_base": "http://hapi-fhir-service.hapi-fhir.svc.cluster.local:8080/fhir/clinical-orders"
+        "fhir_base": "http://hapi-fhir.hapi-fhir.svc.cluster.local:8080/fhir/clinical-orders"
       }
     }
 ---

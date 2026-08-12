@@ -4,8 +4,8 @@
 |---|---|
 | `policies/` | The rego **policies** — party-local hard copies (`apisix.rego`, `main.rego`). Bind-mounted into the `opa` container at `/policies` (compose) / generated into the `opa-policies` ConfigMap (k8s). |
 | `opa-config.json` | The party's OPA **data document** — just `fhir_base` (the base HAPI's `clinical-orders` partition). Static; mounted at `/config/opa-config.json`. **Compose only** — k8s uses its own `opa-config` ConfigMap (different HAPI address). |
-| `opa.yaml`, `ns-opa.yaml`, `kustomization.yaml` | k8s Deployment + Service + `opa-config` ConfigMap, the `opa` **namespace**, and the kustomize entrypoint. |
-| `opa-ingress.yaml` | Ingress exposing OPA's **decision surface only** (`/v1/data/umzh/authz`) so an external platform (MuleSoft) can query decisions. |
+| `opa.yaml`, `ns.yaml`, `kustomization.yaml` | k8s Deployment + Service + `opa-config` ConfigMap, the `opa` **namespace**, and the kustomize entrypoint. |
+| `ingress.yaml` | Ingress exposing OPA's **decision surface only** (`/v1/data/umzh/authz`) so an external platform (MuleSoft) can query decisions. |
 
 `policies/` holds only what the external gateway's `umzh/authz/apisix` entrypoint
 needs: `apisix.rego` (the APISIX request adapter) and `main.rego` (the consent /
@@ -92,7 +92,7 @@ shared `policies/*.rego`, mounted at `/policies`), and the `opa-config` ConfigMa
 
 **OPA talks to HAPI directly, not the clinical-orders proxy.** `fhir_base` in the
 k8s `opa-config` points cross-namespace at the base HAPI's partition
-(`hapi-fhir-service.hapi-fhir.svc.cluster.local:8080/fhir/clinical-orders`). OPA is
+(`hapi-fhir.hapi-fhir.svc.cluster.local:8080/fhir/clinical-orders`). OPA is
 an internal consumer of the source of truth: it uses the explicit partition path
 and skips the outward proxy's partition-hiding / self-link rewriting (irrelevant to
 policy) and its extra hop on the hot path. This is why `fhir_base` is a
@@ -103,7 +103,7 @@ To enable optional backend auth, create the `opa-backend-fhir-auth` Secret (key
 `authorization`); the Deployment reads it as `FHIR_BACKEND_AUTHORIZATION` with
 `optional: true`, so it's a no-op when the Secret is absent.
 
-### External access (MuleSoft) — `opa-ingress.yaml`
+### External access (MuleSoft) — `ingress.yaml`
 
 An external integration platform (MuleSoft) queries OPA for decisions through the
 ingress at `https://opa.dev.umzhc.io.usz.ch`, e.g.:

@@ -1,9 +1,9 @@
 namespace: opa
 
 resources:
-  - ns-opa.yaml
+  - ns.yaml
   - opa.yaml
-  - opa-ingress.yaml
+  - ingress.yaml
 
 # The rego policies are the SAME files docker compose bind-mounts; generate them
 # into the `opa-policies` ConfigMap (mounted at /policies). The data document

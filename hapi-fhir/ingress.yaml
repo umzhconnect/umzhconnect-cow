@@ -17,7 +17,7 @@ spec:
             path: '/'
             backend:
               service:
-                name: hapi-fhir-service
+                name: hapi-fhir
                 port:
                   number: 8080
   tls:
