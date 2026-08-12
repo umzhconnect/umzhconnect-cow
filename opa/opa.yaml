@@ -63,6 +63,11 @@ spec:
             - --server
             - --addr=0.0.0.0:8181
             - --log-level=info
+            # A ConfigMap volume mounts files alongside a `..data` symlink and a
+            # `..<timestamp>` dir, so a recursive load of /policies would read each
+            # policy TWICE (→ "multiple default rules"). Skip the dot-prefixed
+            # entries; the top-level symlinks (main.rego, gateway.rego) still load.
+            - --ignore=.*
             - /policies
             - /config/opa-config.json
           env:
