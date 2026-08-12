@@ -12,7 +12,7 @@ resources:
 configMapGenerator:
   - name: opa-policies
     files:
-      - apisix.rego=policies/apisix.rego
+      - gateway.rego=policies/gateway.rego
       - main.rego=policies/main.rego
 
 generatorOptions:

@@ -18,8 +18,8 @@ Three layers, following the testing pyramid:
 
 `tests/opa/main_test.rego` covers rules 1a–6 and every branch (scope present/
 absent, org match/mismatch, consent active/expired/missing, resource in/out of
-graph); `tests/opa/adapter_test.rego` covers the APISIX path/query parsing in
-`apisix.rego`. Rules that call `http.send` (Task/Consent/ServiceRequest fetches)
+graph); `tests/opa/adapter_test.rego` covers the gateway/PEP path/query parsing in
+`gateway.rego`. Rules that call `http.send` (Task/Consent/ServiceRequest fetches)
 mock it with `with http.send as <fn>`, so the suite is fully self-contained.
 
 ```bash

@@ -5,9 +5,10 @@
 # ⚠️  SECURITY: OPA's REST API is powerful. The full API also allows WRITING data
 # and policies (PUT /v1/policies, PUT/PATCH /v1/data, /v1/compile, /v1/query),
 # so it must NOT be exposed wholesale. This ingress therefore publishes ONLY the
-# decision surface — the `umzh.authz` package under /v1/data/umzh/authz — so the
-# outside world can POST a decision query but cannot reach policy/data management
-# or other packages.
+# gateway ADAPTER decision entrypoint — /v1/data/umzh/authz/gateway — so external
+# consumers can POST a decision query (request + bearer) but cannot reach policy/
+# data management, other packages, OR the core /v1/data/umzh/authz/allow (which
+# trusts a caller-supplied fhir_base — see gateway.rego / requests/README).
 #
 # This is EDGE scoping, not authentication. OPA itself still trusts every caller
 # that reaches it, and even under this prefix an HTTP verb other than POST could
@@ -32,11 +33,12 @@ spec:
     - host: opa.dev.umzhc.io.usz.ch
       http:
         paths:
-          # Decision API only: POST /v1/data/umzh/authz/allow (core policy) or
-          # /v1/data/umzh/authz/apisix (adapter entrypoint). Widen the prefix only
-          # if MuleSoft genuinely needs more — never to bare /v1/data or /v1/.
+          # Adapter decision entrypoint ONLY: POST /v1/data/umzh/authz/gateway/allow
+          # (request + bearer in → boolean out). Deliberately NOT the core
+          # /v1/data/umzh/authz/allow (caller-controlled fhir_base) nor bare
+          # /v1/data. Widen only if a consumer genuinely needs more.
           - pathType: Prefix
-            path: '/v1/data/umzh/authz'
+            path: '/v1/data/umzh/authz/gateway'
             backend:
               service:
                 name: opa

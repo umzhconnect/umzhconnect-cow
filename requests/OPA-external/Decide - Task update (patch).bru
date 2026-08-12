@@ -1,0 +1,36 @@
+meta {
+  name: Decide - Task update (patch)
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{opaUrl}}/v1/data/umzh/authz/gateway/allow
+  body: json
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "input": {
+      "request": {
+        "method": "PATCH",
+        "path": "/fhir/Task/task-e2e",
+        "query": {},
+        "headers": {
+          "authorization": "Bearer {{bearerToken}}"
+        }
+      }
+    }
+  }
+}
+
+docs {
+  May this caller PATCH Task/task-e2e? Requires system/Task.u AND — this is
+  DATA-DEPENDENT — the stored Task's owner must equal the token's org. OPA fetches
+  the Task itself (from its configured fhir_base) to check ownership, so this needs
+  the stack up + the Task present. Response: { "result": true|false }.
+}

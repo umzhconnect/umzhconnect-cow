@@ -1,0 +1,36 @@
+meta {
+  name: Decide - FHIR read by id
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{opaUrl}}/v1/data/umzh/authz/gateway/allow
+  body: json
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "input": {
+      "request": {
+        "method": "GET",
+        "path": "/fhir/Patient/pat-e2e",
+        "query": {},
+        "headers": {
+          "authorization": "Bearer {{bearerToken}}"
+        }
+      }
+    }
+  }
+}
+
+docs {
+  May this caller read Patient/pat-e2e? Allowed only if the resource is inside a
+  fhirContext graph the token is consented for (system/Patient.r + a Consent for the
+  ServiceRequest/Task context whose graph contains this Patient). DATA-DEPENDENT.
+  Response: { "result": true|false }.
+}

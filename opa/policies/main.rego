@@ -38,7 +38,7 @@ default http_status := 200
 http_status := 403 if { not allow }
 
 # ---------------------------------------------------------------------------
-# Input structure expected from APISIX (`apisix.rego` adapter) / API Gateway:
+# Input structure expected from the gateway/PEP adapter (`gateway.rego`):
 # {
 #   "method": "GET",
 #   "path": "/fhir/Patient/123",
@@ -206,7 +206,7 @@ fhir_context_task_refs contains ref if {
 
 # Headers OPA sends on its FHIR fetches. Always Accept JSON; additionally carry
 # Authorization when the FHIR server requires it — input.fhir_authorization is the
-# full header value, injected by the adapter (apisix.rego) from the OPA
+# full header value, injected by the adapter (gateway.rego) from the OPA
 # environment. Empty/absent ⇒ Accept-only, unchanged behaviour.
 _fhir_headers := {"Accept": "application/fhir+json", "Authorization": auth} if {
 	auth := object.get(input, "fhir_authorization", "")

@@ -1,0 +1,38 @@
+meta {
+  name: Decide - ServiceRequest search
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{opaUrl}}/v1/data/umzh/authz/gateway/allow
+  body: json
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "input": {
+      "request": {
+        "method": "GET",
+        "path": "/fhir/ServiceRequest",
+        "query": {
+          "_id": "sr-e2e"
+        },
+        "headers": {
+          "authorization": "Bearer {{bearerToken}}"
+        }
+      }
+    }
+  }
+}
+
+docs {
+  May this caller search ServiceRequest?_id=sr-e2e? OPA derives the target id from
+  query._id, then applies the fhirContext + Consent graph rule (system/
+  ServiceRequest.r + an active Consent naming the caller for the sr-e2e context).
+  DATA-DEPENDENT (OPA fetches Consent/ServiceRequest). Response: { "result": true|false }.
+}

@@ -1,33 +1,47 @@
-package umzh.authz.apisix
+package umzh.authz.gateway
 
 import rego.v1
 
 # ---------------------------------------------------------------------------
-# Input shape sent by APISIX's built-in `opa` plugin:
+# Gateway / PEP request adapter. The SAME entrypoint serves every Policy
+# Enforcement Point that fronts this node — the APISIX external gateway AND
+# external integration platforms (e.g. MuleSoft) reaching OPA through its ingress.
+# All of them POST the request they are proxying as `input.request`:
 # {
 #   "input": {
 #     "request": {
 #       "method":  "GET",
 #       "path":    "/fhir/ServiceRequest",     # no query string
 #       "query":   {"_id": "ReferralOrthopedicSurgery"},
-#       "headers": {"authorization": "Bearer ...", ...}
+#       "headers": {"authorization": "Bearer ..."}   # header name case-insensitive
 #     }
 #   }
 # }
 #
 # Party-specific constant (fhir_base) comes from data.config, injected per OPA
-# instance via a mounted config JSON.
+# instance via a mounted config JSON — never from the caller.
+#
+# ── TRUST MODEL (see BACKLOG.md) ────────────────────────────────────────────
+# io.jwt.decode below does NOT verify the JWT signature; it only reads the
+# claims. Every consumer MUST authenticate the token BEFORE calling OPA: APISIX
+# does it with its openid-connect plugin (JWKS); MuleSoft validates the token in
+# its own flow before forwarding. So OPA does authZ on an already-authN'd token.
+# Adding OPA-side signature verification (io.jwt.decode_verify vs the auth-server
+# JWKS) is a tracked improvement — see BACKLOG.md.
 # ---------------------------------------------------------------------------
 
-# Decode the JWT from the Authorization header (validated by openid-connect before this runs).
-# Reading from Authorization (original request) rather than X-Access-Token (set internally
-# by openid-connect) avoids APISIX's header-cache staleness — core.request.headers(ctx) is
-# snapshot-cached before openid-connect's set_header calls are visible to later plugins.
-# io.jwt.decode does NOT verify the signature — validation already happened at the gateway.
+# The Authorization header value, looked up CASE-INSENSITIVELY: APISIX lowercases
+# header names, but other consumers (MuleSoft) may send "Authorization". Absent ⇒
+# jwt_payload stays unset ⇒ default-deny.
+_authorization := v if {
+	some k, v in input.request.headers
+	lower(k) == "authorization"
+}
+
+# Decode (NOT verify — see the trust model above) the JWT from the bearer.
 jwt_payload := payload if {
-	auth := input.request.headers["authorization"]
-	startswith(auth, "Bearer ")
-	tok := substring(auth, 7, -1)
+	startswith(_authorization, "Bearer ")
+	tok := substring(_authorization, 7, -1)
 	[_, payload, _] := io.jwt.decode(tok)
 }
 
@@ -74,6 +88,14 @@ canonical_path := input.request.path if {
 # Authorization is SMART-scope + context (organization_reference / consent /
 # fhirContext) centric — every rule in main.rego carries its own scope and
 # identity conditions, so there is no coarse realm-role gate here.
+#
+# `default allow := false` makes the decision an EXPLICIT boolean: a denied query
+# returns {"result": false} rather than an undefined {} (which happens when the
+# rule body isn't satisfied — e.g. no bearer, or main.rego denied). External
+# callers (MuleSoft) can then check `result == false` instead of "result absent".
+# The APISIX gateway plugin treats false and absent the same, so this is inert
+# for the gateway.
+default allow := false
 
 allow if {
 	# Evaluate existing policy with the input shape it expects.

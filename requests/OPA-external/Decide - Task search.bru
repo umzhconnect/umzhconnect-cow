@@ -1,0 +1,38 @@
+meta {
+  name: Decide - Task search
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{opaUrl}}/v1/data/umzh/authz/gateway/allow
+  body: json
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "input": {
+      "request": {
+        "method": "GET",
+        "path": "/fhir/Task",
+        "query": {},
+        "headers": {
+          "authorization": "Bearer {{bearerToken}}"
+        }
+      }
+    }
+  }
+}
+
+docs {
+  An external consumer (a gateway / integration platform, e.g. MuleSoft) asks OPA:
+  may this caller run GET /fhir/Task? Pass the request being proxied
+  (method/path/query) + the client's bearer. OPA decodes scope/org/fhirContext
+  from the token and injects fhir_base from its OWN config — you pass NEITHER.
+  Response: { "result": true|false }. (Allows when the token carries system/Task.s
+  — or the combined system/Task.crus — and a non-empty org.)
+}

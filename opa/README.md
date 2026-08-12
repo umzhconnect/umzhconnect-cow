@@ -2,13 +2,14 @@
 
 | Here (party-local) | What |
 |---|---|
-| `policies/` | The rego **policies** — party-local hard copies (`apisix.rego`, `main.rego`). Bind-mounted into the `opa` container at `/policies` (compose) / generated into the `opa-policies` ConfigMap (k8s). |
+| `policies/` | The rego **policies** — party-local hard copies (`gateway.rego`, `main.rego`). Bind-mounted into the `opa` container at `/policies` (compose) / generated into the `opa-policies` ConfigMap (k8s). |
 | `opa-config.json` | The party's OPA **data document** — just `fhir_base` (the base HAPI's `clinical-orders` partition). Static; mounted at `/config/opa-config.json`. **Compose only** — k8s uses its own `opa-config` ConfigMap (different HAPI address). |
 | `opa.yaml`, `ns.yaml`, `kustomization.yaml` | k8s Deployment + Service + `opa-config` ConfigMap, the `opa` **namespace**, and the kustomize entrypoint. |
-| `ingress.yaml` | Ingress exposing OPA's **decision surface only** (`/v1/data/umzh/authz`) so an external platform (MuleSoft) can query decisions. |
+| `ingress.yaml` | Ingress exposing **only the gateway adapter decision entrypoint** (`/v1/data/umzh/authz/gateway`) so an external consumer (e.g. MuleSoft) can query decisions. |
 
-`policies/` holds only what the external gateway's `umzh/authz/apisix` entrypoint
-needs: `apisix.rego` (the APISIX request adapter) and `main.rego` (the consent /
+`policies/` holds only what the `umzh/authz/gateway` entrypoint needs:
+`gateway.rego` (the generic gateway/PEP request adapter — serves the APISIX
+gateway AND external consumers like MuleSoft) and `main.rego` (the consent /
 fhirContext rules it delegates to). These were forked from the two-party UMZH
 Connect sandbox (`services/opa/policies` there) and are now owned here —
 reconcile the two manually. The sandbox's `capabilities.rego` /
@@ -19,17 +20,22 @@ because the gateway enforces param/`_include` allowlists at the edge via
 **Authorization is SMART-scope + context-centric.** Every rule in `main.rego`
 carries its own scope (`system/<Type>.<action>`) and identity condition
 (`organization_reference` match / consent / fhirContext graph). There is no
-coarse realm-role gate — `apisix.rego` delegates straight to `main.rego`. The one
+coarse realm-role gate — `gateway.rego` delegates straight to `main.rego`. The one
 rule without a scope is `/fhir/metadata` (the public CapabilityStatement).
 
 ## How a request flows
 
 ```
-APISIX opa plugin ── POST input.request {method, path, query, headers} ──▶ umzh/authz/apisix (apisix.rego)
-  apisix.rego: decode the (already-validated) bearer, parse the path, read
+PEP (APISIX gateway / MuleSoft) ── POST input.request {method, path, query, headers} ──▶ umzh/authz/gateway (gateway.rego)
+  gateway.rego: decode the (already-authenticated) bearer, parse the path, read
                fhir_base from data.config, then evaluate data.umzh.authz.allow
                with the mapped input ──▶ main.rego rules ──▶ allow = true/false
 ```
+
+> **Trust boundary:** `gateway.rego` decodes but does **not** verify the JWT
+> signature — every consumer authenticates the token first (APISIX via
+> openid-connect; MuleSoft in its own flow). OPA-side signature verification is a
+> tracked improvement — see `../BACKLOG.md`.
 
 `main.rego` rules 1b/1d/4/4b call `http.send` back to the FHIR server
 (`input.fhir_base`) to read the live Task / Consent / ServiceRequest that the
@@ -68,7 +74,7 @@ Empty (the default) sends no such header — unchanged behaviour.
 
 **It does NOT go in `opa-config.json`.** That file is committed and holds only the
 non-secret `fhir_base`; a credential there would be a secret in git. Instead
-`apisix.rego` reads it from the OPA **process environment** via
+`gateway.rego` reads it from the OPA **process environment** via
 `opa.runtime().env.FHIR_BACKEND_AUTHORIZATION` and passes it into the policy input
 as `fhir_authorization`; `main.rego` adds it to the request headers only when
 non-empty. Inject it at runtime — compose `environment:` (from `.env`) or, in k8s,
@@ -103,25 +109,34 @@ To enable optional backend auth, create the `opa-backend-fhir-auth` Secret (key
 `authorization`); the Deployment reads it as `FHIR_BACKEND_AUTHORIZATION` with
 `optional: true`, so it's a no-op when the Secret is absent.
 
-### External access (MuleSoft) — `ingress.yaml`
+### External access (e.g. MuleSoft) — `ingress.yaml`
 
-An external integration platform (MuleSoft) queries OPA for decisions through the
-ingress at `https://opa.dev.umzhc.io.usz.ch`, e.g.:
+An external consumer queries OPA for decisions through the ingress at
+`https://opa.dev.umzhc.io.usz.ch`, using the **gateway adapter** entrypoint —
+exactly like the APISIX gateway does internally, just over the ingress. It
+forwards the request it is proxying + the client's bearer; it passes **no**
+`fhir_base` and no scope/org (OPA decodes those from the token and injects
+`fhir_base` from its own config). See `requests/OPA-external/` and
+`requests/README.md` for the full contract.
 
 ```
-POST https://opa.dev.umzhc.io.usz.ch/v1/data/umzh/authz/allow
-  { "input": { …the rule input… } }        # → { "result": true|false }
+POST https://opa.dev.umzhc.io.usz.ch/v1/data/umzh/authz/gateway/allow
+  { "input": { "request": { "method": "...", "path": "/fhir/...",
+                            "headers": { "authorization": "Bearer <token>" } } } }
+  # → { "result": true | false }
 ```
 
-⚠️ **The ingress deliberately publishes only `/v1/data/umzh/authz`.** OPA's REST
-API otherwise allows *writing* data and policies (`/v1/policies`, `/v1/data`
-PUT/PATCH, `/v1/compile`, `/v1/query`) — never expose it wholesale. This path
-scoping is **edge** control, not authentication: OPA still trusts whoever reaches
-it. In front of it you must also authenticate the platform (mTLS / a gateway
-credential at the WAF, ideally POST-only), and/or enable OPA's own API
-authn/authz (`--authentication`, `--authorization`) if anything but the trusted
-platform could reach the Service. Keep the base HAPI and the rest of OPA's API off
-the public internet (NetworkPolicy).
+⚠️ **The ingress deliberately publishes only `/v1/data/umzh/authz/gateway`** — not
+the core `/v1/data/umzh/authz/allow` (which trusts a caller-supplied `fhir_base` →
+bypass), and not OPA's data/policy management (`/v1/policies`, `/v1/data`
+PUT/PATCH, `/v1/compile`, `/v1/query`). This path scoping is **edge** control, not
+authentication: OPA still trusts whoever reaches it (and does not verify the JWT
+signature — see the trust boundary above / `../BACKLOG.md`). In front of it you
+must also authenticate the platform (mTLS / a gateway credential at the WAF,
+ideally POST-only), and/or enable OPA's own API authn/authz (`--authentication`,
+`--authorization`) if anything but the trusted platform could reach the Service.
+Keep the base HAPI and the rest of OPA's API off the public internet
+(NetworkPolicy).
 
 > **Note:** OPA-level API authentication/authorization (token authn + an authz
 > policy that permits only POST to the decision path) is **not enabled yet** — it
@@ -144,7 +159,7 @@ Two test files under `tests/opa/`:
 | File | Package | Covers |
 |---|---|---|
 | `main_test.rego` | `umzh.authz_test` | every rule 1a–6 and its branches (scope present/absent, org match/mismatch, consent active/expired/missing, resource in/out of graph), plus the optional backend-auth header (attached when set, absent when unset) |
-| `adapter_test.rego` | `umzh.authz.apisix_test` | `apisix.rego`'s path/query parsing (`resource_type`, `resource_id`, `canonical_path`) for read-by-id vs. search shapes |
+| `adapter_test.rego` | `umzh.authz.gateway_test` | `gateway.rego`'s path/query parsing (`resource_type`, `resource_id`, `canonical_path`) for read-by-id vs. search shapes |
 
 **How the mocking works.** `main_test.rego` defines an input builder `req_in(method,
 type, id, scope, org, ctx)` that produces the exact input shape `main.rego`

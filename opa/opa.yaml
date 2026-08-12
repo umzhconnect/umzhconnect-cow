@@ -68,7 +68,7 @@ spec:
           env:
             # OPTIONAL Authorization header OPA attaches to its FHIR fetches when
             # the HAPI requires credentials (read via opa.runtime().env in
-            # apisix.rego). Kept in a Secret, not the ConfigMap. optional:true ⇒
+            # gateway.rego). Kept in a Secret, not the ConfigMap. optional:true ⇒
             # the deployment works with no such Secret (env unset → no header).
             # Enable with:
             #   kubectl -n opa create secret generic opa-backend-fhir-auth \
