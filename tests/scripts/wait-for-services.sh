@@ -26,7 +26,11 @@ wait_for() {
 
 echo "=== Waiting for services ==="
 wait_for "External gateway"       "${GATEWAY_URL}/healthz"
-wait_for "Clinical-orders proxy"  "${PROXY_URL}/fhir/metadata"
+# NB: /fhir/metadata is NOT partition-gated (HAPI answers 200 even before the
+# partition exists), so probe a partition-scoped search — it 404s until the
+# clinical-orders-init one-shot has created the partition, which is what the seed
+# and the role scenarios actually need. Avoids a race on a fresh DB (e.g. CI).
+wait_for "Clinical-orders partition" "${PROXY_URL}/fhir/Patient?_summary=count"
 wait_for "Key custodian"          "${CUSTODIAN_URL}/healthz"
 wait_for "OPA"                    "${OPA_URL}/health"
 echo "=== Services ready ==="
