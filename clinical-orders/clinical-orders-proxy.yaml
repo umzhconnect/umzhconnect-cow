@@ -47,6 +47,17 @@ spec:
             # the base is also exposed directly via hapi-fhir-ingress.
             - name: PROXY_INTERNAL_BASE
               value: https://hapi-fhir.dev.umzhc.io.usz.ch/fhir
+            # OPTIONAL: full Authorization header injected UPSTREAM to the backend
+            # FHIR store (e.g. "Basic <base64(user:pass)>"). Empty = disabled
+            # (default); the caller's Authorization then passes through unchanged.
+            # Must stay DEFINED (empty is fine) so envsubst renders it. To enable
+            # with a credential, replace this with a Secret reference — the value
+            # is sensitive — and create the Secret:
+            #   kubectl -n clinical-orders create secret generic clinical-orders-backend-auth \
+            #     --from-literal=authorization='Basic <base64(user:pass)>'
+            #   valueFrom: { secretKeyRef: { name: clinical-orders-backend-auth, key: authorization } }
+            - name: PROXY_BACKEND_AUTHORIZATION
+              value: ""
             # Only substitute PROXY_* so nginx's own $host/$1 are left intact.
             - name: NGINX_ENVSUBST_FILTER
               value: PROXY_

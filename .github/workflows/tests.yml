@@ -32,6 +32,18 @@ jobs:
       - name: Run OPA unit tests
         run: tests/scripts/opa-test.sh
 
+  # ── Proxy backend-auth e2e (hermetic: nginx + echo upstream, no full stack) ─
+  proxy-backend-auth-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Asserts the clinical-orders proxy injects the configured Authorization
+      # upstream when PROXY_BACKEND_AUTHORIZATION is set, and passes the caller's
+      # header through when empty. Needs only Docker + curl (present on
+      # ubuntu-latest).
+      - name: Run proxy backend-auth e2e test
+        run: tests/scripts/backend-auth-test.sh
+
   # ── Full-stack integration tests ───────────────────────────────────────────
   integration-tests:
     runs-on: ubuntu-latest

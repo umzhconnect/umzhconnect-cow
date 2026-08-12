@@ -49,6 +49,11 @@ services:
       # Base URL HAPI advertises in self-links (must equal its server_address);
       # the sentinel default matches HAPI's default when fronted by this proxy.
       PROXY_INTERNAL_BASE: ${PROXY_INTERNAL_BASE:-http://localhost:8090/fhir}
+      # OPTIONAL: full Authorization header sent upstream to the backend FHIR
+      # store (e.g. "Basic <base64(user:pass)>"). Empty = disabled (default);
+      # always DEFINED so envsubst renders it (an undefined var would leak the
+      # literal ${...} into the config). clinical-orders only — not the registry.
+      PROXY_BACKEND_AUTHORIZATION: ${PROXY_BACKEND_AUTHORIZATION:-}
       NGINX_ENVSUBST_FILTER: "PROXY_"
     volumes:
       - ./clinical-orders/clinical-orders-proxy.conf.template:/etc/nginx/templates/default.conf.template:ro
@@ -151,15 +156,11 @@ services:
       AUTH_DISCOVERY_URL: ${AUTH_SERVER_URL}/realms/${AUTH_SERVER_REALM}/.well-known/openid-configuration
       OPA_URL: http://opa:8181
       JWKS_UPSTREAM: ${JWKS_UPSTREAM}
-      # Optional Basic auth toward the backend FHIR service ("user:pass"); empty
-      # disables it (umzh-backend-basic-auth plugin). Resolved by apisix.yaml.
-      BACKEND_FHIR_BASIC_AUTH: ${BACKEND_FHIR_BASIC_AUTH:-}
     volumes:
       - ./clinical-orders/apisix/config.yaml:/usr/local/apisix/conf/config.yaml:ro
       - ./clinical-orders/apisix/apisix.yaml:/usr/local/apisix/conf/apisix.yaml:ro
       - ./clinical-orders/apisix/umzh-capability-guard.lua:/usr/local/apisix/apisix/plugins/umzh-capability-guard.lua:ro
       - ./clinical-orders/apisix/umzh-task-requester-inject.lua:/usr/local/apisix/apisix/plugins/umzh-task-requester-inject.lua:ro
-      - ./clinical-orders/apisix/umzh-backend-basic-auth.lua:/usr/local/apisix/apisix/plugins/umzh-backend-basic-auth.lua:ro
     ports:
       - '${EXTERNAL_GATEWAY_PORT}:9080'
     extra_hosts:

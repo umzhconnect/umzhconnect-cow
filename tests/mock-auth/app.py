@@ -101,6 +101,19 @@ def healthz():
     return jsonify({"issuer": ISSUER, "kid": KID})
 
 
+@app.route("/", defaults={"_path": ""}, methods=["GET", "POST", "PATCH", "PUT", "DELETE", "HEAD"])
+@app.route("/<path:_path>", methods=["GET", "POST", "PATCH", "PUT", "DELETE", "HEAD"])
+def echo(_path):
+    # Catch-all header reflector: returns the request headers as JSON for ANY path
+    # the specific OIDC routes above don't claim (Flask matches static rules first,
+    # so /token, /jwks.json, etc. are unaffected). Used as a throwaway UPSTREAM in
+    # the backend-auth test (tests/scripts/backend-auth-test.sh): the clinical-orders
+    # proxy rewrites /fhir/… → /fhir/clinical-orders/…, so the reflector must answer
+    # on any path. Lets the test observe the Authorization the proxy forwards
+    # upstream. Test-only.
+    return jsonify({"headers": dict(request.headers)})
+
+
 @app.post("/token")
 def token():
     body = request.get_json(silent=True) or {}

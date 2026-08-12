@@ -17,7 +17,23 @@
 # http://localhost:8090/fhir; the rewrites below key off it, so it MUST match
 # whatever HAPI actually emits. The partition name is structural and stays
 # literal here.
+#
+# OPTIONAL backend auth (clinical-orders only): ${PROXY_BACKEND_AUTHORIZATION} is
+# the full Authorization header value to send UPSTREAM to the backend FHIR store
+# (e.g. "Basic <base64(user:pass)>"). Leave it EMPTY (the default) to disable —
+# the caller's own Authorization is then forwarded unchanged and nothing is
+# intercepted. Set it (env / k8s Secret) when the backend requires credentials.
 # =============================================================================
+
+# When PROXY_BACKEND_AUTHORIZATION is empty the interceptor is a no-op: the map
+# falls back to the caller's Authorization header ($http_authorization), so the
+# request is forwarded exactly as it arrives. When set, its value overrides the
+# Authorization sent upstream.
+map $backend_authorization $fhir_authorization {
+    ""      $http_authorization;
+    default $backend_authorization;
+}
+
 upstream hapi_base { server ${PROXY_UPSTREAM}; }
 
 server {
@@ -29,12 +45,21 @@ server {
     proxy_busy_buffers_size 256k;
 
     location ~ ^/fhir(/.*)?$ {
+        # OPTIONAL backend auth: bake the configured header value into a variable
+        # BEFORE the `rewrite … break` below — that break halts rewrite-module
+        # directives (`set` included), so a `set` placed after it would never run.
+        # The proxy then forwards either this value (when set) or the caller's own
+        # Authorization (when empty) via the map above. Disabled unless
+        # PROXY_BACKEND_AUTHORIZATION is set, so nothing is intercepted by default.
+        set               $backend_authorization "${PROXY_BACKEND_AUTHORIZATION}";
+
         # /fhir(/...)  ->  /fhir/clinical-orders(/...)  on the base.
         rewrite ^/fhir(/.*)?$ /fhir/clinical-orders$1 break;
         proxy_pass        http://hapi_base;
         proxy_set_header  Host            $host;
         proxy_set_header  X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header  Accept-Encoding "";
+        proxy_set_header  Authorization   $fhir_authorization;
 
         sub_filter_once  off;
         sub_filter_types *;

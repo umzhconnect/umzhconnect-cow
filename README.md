@@ -88,6 +88,15 @@ it to the base's real advertised URL when the base is *also* exposed directly (e
 via `hapi-fhir-ingress`) — otherwise the host is stripped of its partition but not
 rewritten to the outward URL.
 
+**Optional backend auth (clinical-orders only).** If the backend FHIR store
+requires credentials (e.g. a commercial server behind the proxy), set
+`PROXY_BACKEND_AUTHORIZATION` to the full `Authorization` header value —
+`Basic <base64(user:pass)>` — and the clinical-orders proxy injects it on the
+upstream request, overwriting the caller's own `Authorization` (which it does not
+forward to the backend). Empty (the default) disables it: the caller's header
+passes through untouched. It's a `PROXY_*` env (`.env`/compose) or Deployment env
+(k8s, ideally from a Secret); the registry proxy has no such injection.
+
 ```bash
 curl http://localhost:9084/fhir/Organization        # registry, no partition in URL
 curl http://localhost:9091/fhir/Task                 # this party's clinical-orders

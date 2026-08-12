@@ -1,9 +1,13 @@
 # tests
 
-Two layers, following the testing pyramid:
+Three layers, following the testing pyramid:
 
 - **OPA policy unit tests** (`tests/opa/`, run with `opa test`) — exhaustive,
   hermetic coverage of every authorization rule. No stack, no auth, no HAPI.
+- **Proxy backend-auth e2e** (`tests/scripts/backend-auth-test.sh`) — hermetic
+  nginx + echo upstream, asserting the clinical-orders proxy injects the configured
+  `PROXY_BACKEND_AUTHORIZATION` toward the backend when set and passes the caller's
+  header through when empty. No full stack.
 - **Integration tests** ([Hurl](https://hurl.dev), `tests/hurl/`) — thin
   end-to-end checks through the real gateway → OPA → HAPI, with a throwaway mock
   auth issuer (or a real auth server). Proves the wiring.
@@ -25,6 +29,28 @@ tests/scripts/opa-test.sh --coverage   # coverage report
 
 This is where pure-policy cases live (e.g. consent-actor mismatch, expired
 consent) — they don't need the gateway, so they're not duplicated in Hurl.
+
+---
+
+## Proxy backend-auth e2e (clinical-orders)
+
+```bash
+tests/scripts/backend-auth-test.sh     # needs docker + curl
+```
+
+Stands up a throwaway echo upstream (the mock-auth catch-all, which reflects
+request headers) and runs the **real** clinical-orders proxy template
+(`clinical-orders/clinical-orders-proxy.conf.template`) in two nginx containers.
+It then asserts what the proxy forwards **upstream** to the backend:
+
+- `PROXY_BACKEND_AUTHORIZATION` **set** → that value is injected as the upstream
+  `Authorization`, overwriting the caller's bearer (so the token never reaches the
+  backend);
+- `PROXY_BACKEND_AUTHORIZATION` **empty** → the interceptor no-ops and the caller's
+  `Authorization` passes through untouched.
+
+This covers the clinical-orders proxy only (the registry proxy has no backend-auth
+injection). Hermetic — no DB, no auth server, no HAPI, no APISIX.
 
 ---
 
