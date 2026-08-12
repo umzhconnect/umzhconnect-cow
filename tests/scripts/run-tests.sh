@@ -3,7 +3,7 @@
 # run-tests.sh — integration test runner for this single-party node.
 #
 #   1. wait for services
-#   2. run the unauthenticated suite (health, registry read-only, auth negatives)
+#   2. run the unauthenticated suite (health, auth negatives)
 #   3. if the mock auth issuer is up (test overlay), seed the placer fixtures,
 #      run placer.hurl + fulfiller.hurl, then tear the fixtures down
 #
@@ -27,7 +27,6 @@ REPORT_DIR="${SCRIPT_DIR}/../reports"
 mkdir -p "$REPORT_DIR"
 
 GATEWAY_URL="${GATEWAY_URL:-http://localhost:9081}"
-REGISTRY_URL="${REGISTRY_URL:-http://localhost:9084}"
 CUSTODIAN_URL="${CUSTODIAN_URL:-http://localhost:9087}"
 OPA_URL="${OPA_URL:-http://localhost:9181}"
 MOCK_AUTH_URL="${MOCK_AUTH_URL:-http://localhost:9099}"
@@ -39,7 +38,7 @@ CALLER_ORG="${CALLER_ORG:-http://localhost:9084/fhir/Organization/HospitalA}"
 OUR_ORG="${OUR_ORG:-http://localhost:9084/fhir/Organization/HospitalB}"
 SR_ID="${SR_ID:-sr-e2e}"
 PAT_ID="${PAT_ID:-pat-e2e}"
-export GATEWAY_URL REGISTRY_URL CUSTODIAN_URL OPA_URL PROXY_URL CALLER_ORG
+export GATEWAY_URL CUSTODIAN_URL OPA_URL PROXY_URL CALLER_ORG
 export MOCK_AUTH_URL TOKEN_SOURCE
 
 echo "============================================="
@@ -54,7 +53,6 @@ run() {  # run <hurl-file> [extra --variable args...]
     echo "--- $name ---"
     if hurl --test --report-junit "${REPORT_DIR}/${name}.xml" \
         --variable "gateway_url=${GATEWAY_URL}" \
-        --variable "registry_url=${REGISTRY_URL}" \
         --variable "custodian_url=${CUSTODIAN_URL}" \
         --variable "opa_url=${OPA_URL}" \
         "$@"; then :; else fail=1; fi
@@ -62,8 +60,7 @@ run() {  # run <hurl-file> [extra --variable args...]
 
 # --- Unauthenticated suite (always) ---
 run "${HURL_DIR}/01-health.hurl"
-run "${HURL_DIR}/02-registry-readonly.hurl"
-run "${HURL_DIR}/03-auth-negative.hurl"
+run "${HURL_DIR}/02-auth-negative.hurl"
 
 # --- Role scenarios (need an auth source to mint tokens) ---
 if [ "$TOKEN_SOURCE" = "mock" ]; then
@@ -80,7 +77,9 @@ if curl -sf --max-time 5 "$auth_probe" > /dev/null 2>&1; then
 
     PLACER_TOKEN=$(SCOPE="system/ServiceRequest.r system/Patient.r" ORG_REF="${CALLER_ORG}" \
         CONTEXT_REF="ServiceRequest/${SR_ID}" sh "$SCRIPT_DIR/get-token.sh" || true)
-    FULFILLER_TOKEN=$(SCOPE="system/Task.c system/Task.r system/Task.s system/Task.u" \
+    # Combined SMART v2 scope (one scope granting create/read/update/search on Task);
+    # read scopes stay per-type. Combined and per-type both satisfy has_smart_scope.
+    FULFILLER_TOKEN=$(SCOPE="system/Task.crus" \
         ORG_REF="${OUR_ORG}" sh "$SCRIPT_DIR/get-token.sh" || true)
 
     if [ -n "$PLACER_TOKEN" ]; then

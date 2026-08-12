@@ -18,12 +18,10 @@ rendered from `.env` at startup, and its L2 signing key is generated locally
 |---|---|
 | `apisix-external` | External API gateway — JWT auth + OPA policy in front of `clinical-orders-fhir`. Runs the same standalone config as the k8s gateway (`clinical-orders/apisix/`); auth/OPA URLs from env. |
 | `opa` | Consent / fhirContext policy engine (party-local Rego in `opa/policies/`). |
-| `hapi-fhir` | The party's partitioned FHIR store (base), backed by a **managed (external) Postgres** — see below. Partitions: `clinical-orders` (this party's data, acts as fulfiller) and `registry` (mCSD directory). Internal only — reached via the proxies below. |
+| `hapi-fhir` | The party's partitioned FHIR store (base), backed by a **managed (external) Postgres** — see below. Partition: `clinical-orders` (this party's data, acts as fulfiller). Internal only — reached via the proxy below. |
 | `clinical-orders-fhir` | Outward, **partition-less** FHIR proxy for this party's `clinical-orders` partition (mirrors the k8s proxy). Maps `/fhir/*` → base `/fhir/clinical-orders/*` and strips the partition out of self-links/`Location`. |
-| `registry-fhir` | Outward, **partition-less** mCSD proxy for the `registry` partition (mirrors the k8s proxy). Maps `/fhir/*` → base `/fhir/registry/*` and strips the partition out. |
 | `key-custodian` | Holds the party's L2 private key; signs `private_key_jwt` assertions and serves the JWK Set. |
 | `clinical-orders-init` | One-shot (owned by `clinical-orders/`): create this party's empty `clinical-orders` partition on the base HAPI. |
-| `registry-seed` | One-shot (owned by `registry/`): create the `registry` partition and merge the mCSD directory from `registry/registry-bundle.json`. |
 
 ### Service folders
 
@@ -34,7 +32,6 @@ manifests, so the same asset serves both docker compose and k8s:
 |---|---|
 | `hapi-fhir/` | base HAPI `application.yaml` + k8s manifests |
 | `clinical-orders/` | FHIR proxy template, partition init, the APISIX external gateway (`clinical-orders/apisix/`), k8s manifests |
-| `registry/` | FHIR proxy template, registry seed + bundle, k8s manifests |
 | `opa/` | `policies/` (party-local rego) + static `opa-config.json` — see `opa/README.md` |
 | `key-custodian/` | L2 assertion signer + JWKS publisher (build context) — see `key-custodian/README.md` |
 | `keys/` | `gen-keys.sh` generates this node's L2 signing key (gitignored) — see `keys/README.md` |
@@ -60,24 +57,26 @@ The **partition layout** is created at seed time on the managed instance:
 | Partition | Contents |
 |---|---|
 | `clinical-orders` | This party's clinical data (acts as the fulfiller). Created empty; records arrive at runtime. |
-| `registry` | mCSD `Organization`/`Endpoint`/`HealthcareService` directory for `placer` and `fulfiller`, merged (PUT/upsert) from `registry/registry-bundle.json`. |
 
-### Partition-less proxies
+> The mCSD **registry** used to be a second partition here; it is now its own
+> self-contained deployment (see the `umzhconnect-registry` repo) and is consumed
+> as external infrastructure via `REGISTRY_URL`.
+
+### Partition-less proxy
 
 The base HAPI is URL-partitioned (`/fhir/{partition}/…`), but that segment must
-not leak outward. Two nginx proxies front the base and expose **partition-less**
+not leak outward. An nginx proxy fronts the base and exposes **partition-less**
 FHIR:
 
 | Service | Host port (default) | Maps to base partition |
 |---|---|---|
 | `clinical-orders-fhir` | `CLINICAL_ORDERS_FHIR_PORT` (9091) | `clinical-orders` |
-| `registry-fhir` | `REGISTRY_FHIR_PORT` (9084) | `registry` |
 
-Each rewrites inbound `/fhir/*` onto `/fhir/<partition>/*`, and strips the
+It rewrites inbound `/fhir/*` onto `/fhir/clinical-orders/*`, and strips the
 partition back out of response bodies (`sub_filter`) **and** the `Location`
 header (`proxy_redirect`); the duplicate `Content-Location` header is dropped.
-The proxy config is the shared `<service>/<service>-proxy.conf.template`, rendered
-at container start by the nginx image's built-in envsubst from `PROXY_UPSTREAM`
+The proxy config is the shared `clinical-orders/clinical-orders-proxy.conf.template`,
+rendered at container start by the nginx image's built-in envsubst from `PROXY_UPSTREAM`
 (base host:port = `HAPI_BASE_UPSTREAM`), `PROXY_OUTWARD_URL` (= `*_FHIR_URL`, the
 outward base the proxy advertises — keep it equal to the reachable host:port), and
 `PROXY_INTERNAL_BASE` (the base URL HAPI stamps into self-links, i.e. its
@@ -95,30 +94,27 @@ requires credentials (e.g. a commercial server behind the proxy), set
 upstream request, overwriting the caller's own `Authorization` (which it does not
 forward to the backend). Empty (the default) disables it: the caller's header
 passes through untouched. It's a `PROXY_*` env (`.env`/compose) or Deployment env
-(k8s, ideally from a Secret); the registry proxy has no such injection.
+(k8s, ideally from a Secret).
 
 ```bash
-curl http://localhost:9084/fhir/Organization        # registry, no partition in URL
 curl http://localhost:9091/fhir/Task                 # this party's clinical-orders
 ```
 
 ## Layout & Kubernetes
 
-Each of the three cross-cutting services lives in a **self-contained top-level
-folder** holding both its Kubernetes manifests *and* the shared assets docker
-compose consumes — one file, two consumers:
+Each cross-cutting service lives in a **self-contained top-level folder** holding
+both its Kubernetes manifests *and* the shared assets docker compose consumes —
+one file, two consumers:
 
 | Folder | Namespace | Shared asset(s) (used by compose **and** k8s) | Manifests |
 |---|---|---|---|
 | `hapi-fhir/` | `hapi-fhir` | `application.yaml` | base HAPI Deployment/Service, `managed-postgres` ExternalName |
 | `clinical-orders/` | `clinical-orders` | `clinical-orders-proxy.conf.template`, `create-partition.sh` | proxy Deployment/Service, ingress, hello-world, `clinical-orders-init` Job |
-| `registry/` | `registry` | `registry-proxy.conf.template`, `seed-registry.sh`, `registry-bundle.json` | proxy Deployment/Service, ingress, `registry-seed` Job |
 
-The base HAPI (namespace `hapi-fhir`) is ClusterIP-only; the proxies (their own
-namespaces) reach it at `hapi-fhir.hapi-fhir.svc.cluster.local:8080`. Each service
-**owns its own partition**: `clinical-orders-init` creates this party's empty data
-partition, `registry-seed` creates the registry partition and merges its directory.
-The base does no seeding.
+The base HAPI (namespace `hapi-fhir`) is ClusterIP-only; the proxy (its own
+namespace) reaches it at `hapi-fhir.hapi-fhir.svc.cluster.local:8080`.
+`clinical-orders-init` creates this party's empty data partition; the base does no
+seeding.
 
 **One source of truth.** Nothing is duplicated between compose and k8s. Because
 each shared file sits *inside* its service folder, that folder's `kustomization.yaml`
@@ -126,14 +122,13 @@ generates its ConfigMap from the local file — no `..` escaping, so kubectl's
 built-in kustomize accepts it with no `--load-restrictor` flag:
 
 ```yaml
-# registry/kustomization.yaml
+# clinical-orders/kustomization.yaml
 configMapGenerator:
-  - name: registry-proxy-tpl                       # nginx template -> /etc/nginx/templates/
-    files: [default.conf.template=registry-proxy.conf.template]
-  - name: registry-seed                            # seed Job inputs
-    files: [seed-registry.sh, registry-bundle.json]
-# hapi-fhir/ generates hapi-fhir-config from application.yaml; clinical-orders/
-# generates its proxy template + clinical-orders-init (create-partition.sh).
+  - name: clinical-orders-proxy-tpl                 # nginx template -> /etc/nginx/templates/
+    files: [default.conf.template=clinical-orders-proxy.conf.template]
+  - name: clinical-orders-init                      # partition-init Job input
+    files: [create-partition.sh]
+# hapi-fhir/ generates hapi-fhir-config from application.yaml.
 ```
 
 The proxy `.conf.template` is the *same* file compose mounts; k8s supplies the
@@ -141,8 +136,32 @@ The proxy `.conf.template` is the *same* file compose mounts; k8s supplies the
 entries) as Deployment env. Set `externalName` in `hapi-fhir/managed-db.yaml` to
 your real managed DB host (move the password to a Secret if it has one).
 
-> **Build/apply from `umzhconnect-cow/`:**
-> `kubectl apply -k umzhconnect-cow/` (preview: `kubectl kustomize umzhconnect-cow/`).
+### Deploy
+
+The top-level `kustomization.yaml` aggregates every service, so one command brings
+up the **whole node** across its three namespaces (`hapi-fhir`, `opa`,
+`clinical-orders`):
+
+```bash
+kubectl apply -k umzhconnect-cow/        # preview: kubectl kustomize umzhconnect-cow/
+```
+
+Or apply a single service on its own — each directory is a self-contained base:
+
+```bash
+kubectl apply -k opa/                     # just the policy engine
+kubectl apply -k clinical-orders/         # gateway + FHIR proxy + partition init
+```
+
+**Convergence (no manual ordering needed).** kustomize emits all objects at once
+and k8s has no cross-resource `depends_on`, so start-up races are expected and
+self-heal: OPA and the gateway (and HAPI itself, until its **managed DB** is
+reachable) may `CrashLoopBackOff` / fail readiness on first boot, then recover on
+retry once their dependencies are up. The order the manifests settle into is
+`managed DB → hapi-fhir → opa` + `clinical-orders-fhir → apisix-external`, with
+`clinical-orders-init` (the partition Job) retrying via its `backoffLimit` until
+HAPI answers. A single `apply -k .` therefore converges on its own; you only need
+to ensure the external managed Postgres is reachable (`hapi-fhir/managed-db.yaml`).
 
 **Pod Security (`restricted`).** Every workload sets the `restricted`
 `securityContext` (`runAsNonRoot`, non-zero `runAsUser`, `allowPrivilegeEscalation:
@@ -207,7 +226,7 @@ docker compose -f docker-compose.yml -f docker-compose.test.yml up -d --build
 tests/scripts/run-tests.sh
 ```
 
-`tests/` is an assert-checked Hurl suite — health, registry read-only, auth
+`tests/` is an assert-checked Hurl suite — health, auth
 negatives, plus a **placer** scenario (authorized ServiceRequest + referenced
 reads) and a **fulfiller** scenario (Task create/update); it seeds the few
 records the placer scenario needs and removes them afterward. `requests/` is a
@@ -231,10 +250,10 @@ it can run alongside the sandbox.
 
 ## Notes / limitations
 
-- **Registry seed** lives at `registry/registry-bundle.json` (`placer` + `fulfiller`
-  Organizations, their Endpoints, and HealthcareServices), seeded by the registry
-  service. The `clinical-orders` partition is intentionally seedless — it holds
-  this party's runtime data.
+- **The mCSD registry is external.** It is its own self-contained deployment
+  (`umzhconnect-registry` repo — Organizations/Endpoints/HealthcareServices); this
+  node consumes it via `REGISTRY_URL` and never hosts it. The `clinical-orders`
+  partition is intentionally seedless — it holds this party's runtime data.
 - **DB credentials** are never baked into `hapi-fhir/application.yaml` — it is pure
   `${DB_*}` placeholders. Values come from `.env` (compose) or the
   `managed-db-config` ConfigMap / a Secret (k8s). The `managed-postgres`

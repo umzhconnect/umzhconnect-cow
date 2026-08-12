@@ -1,0 +1,41 @@
+meta {
+  name: Rule 1b - Task read by id
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{opaUrl}}/v1/data/umzh/authz/allow
+  body: json
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "input": {
+      "method": "GET",
+      "resource_type": "Task",
+      "resource_id": "task-e2e",
+      "path": "/fhir/Task/task-e2e",
+      "token": {
+        "organization_reference": "{{orgA}}",
+        "scope": "system/Task.r",
+        "fhir_context": []
+      },
+      "fhir_base": "{{opaFhirBase}}"
+    }
+  }
+}
+
+docs {
+  Rule 1b — Task read by id. Requires system/Task.r AND the fetched Task's
+  requester == organization_reference.
+
+  DATA-DEPENDENT: OPA does http.send to fhir_base/Task/task-e2e. This returns
+  { "result": true } only if a Task with that id exists in the clinical-orders
+  partition whose requester.reference == {{orgA}}. Otherwise the fetch has no
+  200 → the rule is undefined → { "result": false }.
+}

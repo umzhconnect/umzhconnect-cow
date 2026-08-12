@@ -36,15 +36,16 @@ hapi:
     openapi_enabled: true
     # Advertised base URL (CapabilityStatement.implementation.url + absolute
     # self-links / Location headers). From the environment, defaulting to the
-    # sentinel the clinical-orders/registry proxies rewrite. If you override
+    # sentinel the clinical-orders proxy rewrites. If you override
     # FHIR_SERVER_ADDRESS (e.g. because the base HAPI is ALSO exposed directly via
-    # hapi-fhir-ingress), you MUST set the proxies' PROXY_INTERNAL_BASE to the same
-    # value — the proxies key their host-rewrite off it, so a mismatch leaves the
+    # hapi-fhir-ingress), you MUST set the proxy's PROXY_INTERNAL_BASE to the same
+    # value — the proxy keys its host-rewrite off it, so a mismatch leaves the
     # advertised host unrewritten in proxied responses.
     server_address: ${FHIR_SERVER_ADDRESS:http://localhost:8090/fhir}
-    # URL-based multi-tenancy: /fhir/{partitionName}/{resourceType}
-    # Partitions ('clinical-orders', 'registry') are created after startup via
-    # $partition-management-create-partition by the seed job.
+    # URL-based multi-tenancy: /fhir/{partitionName}/{resourceType}. The
+    # 'clinical-orders' partition is created after startup by the clinical-orders
+    # init job. (The mCSD registry is now its own deployment — see the
+    # umzhconnect-registry repo — so no 'registry' partition is created here.)
     partitioning:
       multitenancy_enabled: true
       cross_partition_reference_mode: true

@@ -34,6 +34,14 @@ jwt_payload := payload if {
 # Party config from per-instance data document (opa-config.json).
 fhir_base := data.config.fhir_base
 
+# OPTIONAL Authorization header OPA attaches to its own FHIR fetches (the
+# http.send calls in main.rego for Consent/Task/ServiceRequest). Sourced from the
+# OPA process ENVIRONMENT (opa.runtime().env), NOT the committed opa-config.json,
+# because it is a secret. Empty ⇒ no header (unchanged behaviour). Set it to the
+# full header value, e.g. "Basic <base64(user:pass)>", when the FHIR server OPA
+# queries requires credentials.
+fhir_authorization := object.get(opa.runtime().env, "FHIR_BACKEND_AUTHORIZATION", "")
+
 # ---------------------------------------------------------------------------
 # Path parsing
 # ---------------------------------------------------------------------------
@@ -79,6 +87,7 @@ allow if {
 			"scope":                  object.get(jwt_payload, "scope", ""),
 			"fhir_context":           object.get(jwt_payload, "fhirContext", []),
 		},
-		"fhir_base": fhir_base,
+		"fhir_base":          fhir_base,
+		"fhir_authorization": fhir_authorization,
 	}
 }

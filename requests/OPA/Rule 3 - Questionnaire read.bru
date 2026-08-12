@@ -1,0 +1,36 @@
+meta {
+  name: Rule 3 - Questionnaire read
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{opaUrl}}/v1/data/umzh/authz/allow
+  body: json
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "input": {
+      "method": "GET",
+      "resource_type": "Questionnaire",
+      "resource_id": "q1",
+      "path": "/fhir/Questionnaire/q1",
+      "token": {
+        "organization_reference": "{{orgA}}",
+        "scope": "system/Questionnaire.r",
+        "fhir_context": []
+      },
+      "fhir_base": "{{opaFhirBase}}"
+    }
+  }
+}
+
+docs {
+  Rule 3 — Questionnaire read. Requires system/Questionnaire.r. No consent, no
+  HAPI fetch. Expect { "result": true }.
+}

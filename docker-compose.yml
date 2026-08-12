@@ -65,35 +65,17 @@ services:
     networks:
       - party-net
 
-  # ── registry FHIR proxy — outward, partition-less mCSD endpoint ─────────────
-  # Uses the SAME registry/registry-proxy.conf.template as k8s (see above).
-  registry-fhir:
-    image: nginx:alpine
-    container_name: party-registry-fhir
-    environment:
-      PROXY_UPSTREAM: ${HAPI_BASE_UPSTREAM}
-      # Canonical registry URL — the SAME value the seed bakes into stored
-      # references (__REGISTRY_URL__), so self-links and cross-references agree.
-      PROXY_OUTWARD_URL: ${REGISTRY_URL}
-      # Base URL HAPI advertises in self-links (must equal its server_address);
-      # the sentinel default matches HAPI's default when fronted by this proxy.
-      PROXY_INTERNAL_BASE: ${PROXY_INTERNAL_BASE:-http://localhost:8090/fhir}
-      NGINX_ENVSUBST_FILTER: "PROXY_"
-    volumes:
-      - ./registry/registry-proxy.conf.template:/etc/nginx/templates/default.conf.template:ro
-    ports:
-      - '${REGISTRY_FHIR_PORT}:8080'
-    depends_on:
-      hapi-fhir:
-        condition: service_started
-    networks:
-      - party-net
-
   # ── OPA — consent / fhirContext policy engine ───────────────────────────────
   opa:
     image: openpolicyagent/opa:0.70.0
     platform: linux/amd64
     container_name: party-opa
+    environment:
+      # OPTIONAL: full Authorization header OPA sends to the FHIR server on its
+      # own Consent/Task/ServiceRequest fetches (e.g. "Basic <base64(user:pass)>").
+      # Read via opa.runtime().env in apisix.rego; empty = no header (default).
+      # A secret — not baked into opa-config.json; in k8s inject from a Secret.
+      FHIR_BACKEND_AUTHORIZATION: ${FHIR_BACKEND_AUTHORIZATION:-}
     command:
       - run
       - --server
@@ -185,27 +167,6 @@ services:
     entrypoint: ["/bin/sh", "-c", "apk add --no-cache curl >/dev/null && sh /init/create-partition.sh"]
     volumes:
       - ./clinical-orders/create-partition.sh:/init/create-partition.sh:ro
-    depends_on:
-      hapi-fhir:
-        condition: service_started
-    networks:
-      - party-net
-
-  # ── One-shot: create the registry partition + merge the mCSD directory ──────
-  # Owned by the registry service; script + bundle live in ./registry.
-  registry-seed:
-    image: alpine:3.19
-    container_name: party-registry-seed
-    environment:
-      OWN_EXTERNAL_URL: ${OWN_EXTERNAL_URL}
-      PARTNER_EXTERNAL_URL: ${PARTNER_EXTERNAL_URL}
-      REGISTRY_URL: ${REGISTRY_URL}
-      FHIR_BASE: http://hapi-fhir:8080/fhir
-      REGISTRY_BUNDLE: /seed/registry-bundle.json
-    entrypoint: ["/bin/sh", "-c", "apk add --no-cache curl >/dev/null && sh /seed/seed-registry.sh"]
-    volumes:
-      - ./registry/seed-registry.sh:/seed/seed-registry.sh:ro
-      - ./registry/registry-bundle.json:/seed/registry-bundle.json:ro
     depends_on:
       hapi-fhir:
         condition: service_started

@@ -8,7 +8,6 @@ MAX_WAIT="${MAX_WAIT:-120}"
 INTERVAL=3
 
 GATEWAY_URL="${GATEWAY_URL:-http://localhost:9081}"
-REGISTRY_URL="${REGISTRY_URL:-http://localhost:9084}"
 CUSTODIAN_URL="${CUSTODIAN_URL:-http://localhost:9087}"
 OPA_URL="${OPA_URL:-http://localhost:9181}"
 PROXY_URL="${PROXY_URL:-http://localhost:9091}"
@@ -27,7 +26,6 @@ wait_for() {
 
 echo "=== Waiting for services ==="
 wait_for "External gateway"       "${GATEWAY_URL}/healthz"
-wait_for "Registry"               "${REGISTRY_URL}/fhir/metadata"
 wait_for "Clinical-orders proxy"  "${PROXY_URL}/fhir/metadata"
 wait_for "Key custodian"          "${CUSTODIAN_URL}/healthz"
 wait_for "OPA"                    "${OPA_URL}/health"

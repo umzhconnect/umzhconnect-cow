@@ -1,12 +1,19 @@
 # =============================================================================
-# Kustomize entrypoint for the party's Kubernetes manifests.
+# Kustomize entrypoint for the party's Kubernetes manifests — brings up the WHOLE
+# node in one shot:
 #
 #   kubectl apply -k umzhconnect-cow/      (preview: kubectl kustomize umzhconnect-cow/)
 #
 # Each service directory is self-contained: it holds its own manifests AND the
-# shared assets (application.yaml, seed files, proxy templates) that docker
-# compose also consumes, and generates its ConfigMaps from them locally — so no
-# file is referenced across directories and no --load-restrictor flag is needed.
+# shared assets (application.yaml, proxy templates, rego policies) that docker
+# compose also consumes, sets its own namespace, and generates its ConfigMaps from
+# them locally — so no file is referenced across directories and no
+# --load-restrictor flag is needed. Apply a single service on its own with
+# `kubectl apply -k <dir>/` (e.g. opa/, clinical-orders/).
+#
+# The mCSD registry is NOT here — it is its own deployment (umzhconnect-registry).
 # =============================================================================
 resources:
-  - hapi-fhir
+  - hapi-fhir        # base HAPI (namespace hapi-fhir) + managed-db config
+  - opa              # policy engine (namespace opa)
+  - clinical-orders  # external gateway, FHIR proxy, partition init (namespace clinical-orders)

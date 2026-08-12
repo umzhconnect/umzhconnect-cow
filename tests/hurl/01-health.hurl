@@ -13,12 +13,6 @@ HTTP 200
 jsonpath "$.keys" count > 0
 jsonpath "$.keys[0].kty" == "RSA"
 
-# Registry CapabilityStatement (public, read-only directory).
-GET {{registry_url}}/fhir/metadata
-HTTP 200
-[Asserts]
-jsonpath "$.resourceType" == "CapabilityStatement"
-
 # Key custodian self-report.
 GET {{custodian_url}}/healthz
 HTTP 200

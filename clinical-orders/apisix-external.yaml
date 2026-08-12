@@ -23,9 +23,10 @@ data:
   # ↓ Auth server OIDC discovery document (the gateway validates bearer JWTs
   #   against its JWKS). e.g. https://auth.umzhc.io.usz.ch/realms/umzh-connect/.well-known/openid-configuration
   AUTH_DISCOVERY_URL: "https://REPLACE_AUTH_SERVER/realms/umzh-connect/.well-known/openid-configuration"
-  # ↓ Policy (OPA) server base URL. Point at wherever OPA runs; it is not
-  #   deployed by this folder. e.g. http://opa.opa.svc.cluster.local:8181
-  OPA_URL: "http://REPLACE_OPA_HOST:8181"
+  # ↓ Policy (OPA) server base URL. OPA is deployed by the opa/ folder (namespace
+  #   opa); the default targets its in-cluster Service. Repoint only if OPA runs
+  #   elsewhere.
+  OPA_URL: "http://opa.opa.svc.cluster.local:8181"
   # ↓ The party's key custodian / JWKS host:port. The public /jwks.json route
   #   proxies here so partner IdPs verify our private_key_jwt assertions at this
   #   gateway's same-origin URL. Not deployed by this folder.

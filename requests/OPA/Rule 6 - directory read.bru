@@ -1,0 +1,37 @@
+meta {
+  name: Rule 6 - directory read
+  type: http
+  seq: 10
+}
+
+post {
+  url: {{opaUrl}}/v1/data/umzh/authz/allow
+  body: json
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "input": {
+      "method": "GET",
+      "resource_type": "Organization",
+      "resource_id": "",
+      "path": "/fhir/Organization",
+      "token": {
+        "organization_reference": "{{orgA}}",
+        "scope": "system/Organization.r",
+        "fhir_context": []
+      },
+      "fhir_base": "{{opaFhirBase}}"
+    }
+  }
+}
+
+docs {
+  Rule 6 — directory reads. GET on Organization / Practitioner / PractitionerRole
+  with system/<Type>.r. No consent, no HAPI fetch. Expect { "result": true }.
+  (Swap resource_type to Practitioner / PractitionerRole to exercise the others.)
+}

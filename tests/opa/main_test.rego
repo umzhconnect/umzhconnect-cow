@@ -123,6 +123,42 @@ test_1b_denied_requester_mismatch if {
 }
 
 # ============================================================================
+# Optional backend auth — OPA attaches input.fhir_authorization to its FHIR
+# fetches when set, and nothing when unset. Mocks assert on req.headers.
+# ============================================================================
+
+# Task-fetch mock that ALSO requires the configured Authorization header.
+mock_task_a_auth(req) := {"status_code": 200, "body": {
+	"requester": {"reference": org_a},
+	"owner": {"reference": org_a},
+}} if {
+	contains(req.url, "/Task/")
+	req.headers.Authorization == "Basic dGVzdDp0ZXN0"
+}
+
+# Task-fetch mock that requires NO Authorization header.
+mock_task_a_noauth(req) := {"status_code": 200, "body": {
+	"requester": {"reference": org_a},
+	"owner": {"reference": org_a},
+}} if {
+	contains(req.url, "/Task/")
+	not req.headers.Authorization
+}
+
+test_backend_auth_attached_when_set if {
+	data.umzh.authz.allow with input as object.union(
+		req_in("GET", "Task", "t1", "system/Task.r", org_a, []),
+		{"fhir_authorization": "Basic dGVzdDp0ZXN0"},
+	)
+		with http.send as mock_task_a_auth
+}
+
+test_backend_auth_absent_when_unset if {
+	data.umzh.authz.allow with input as req_in("GET", "Task", "t1", "system/Task.r", org_a, [])
+		with http.send as mock_task_a_noauth
+}
+
+# ============================================================================
 # Rule 1c — Task create (scope only)
 # ============================================================================
 test_1c_create_allowed if {
@@ -219,6 +255,29 @@ test_6_organization_read_allowed if {
 
 test_6_denied_without_scope if {
 	not data.umzh.authz.allow with input as req_in("GET", "Organization", "o1", "system/Patient.r", org_a, [])
+}
+
+# ============================================================================
+# Scope syntax — combined SMART v2 letters are honored; wildcards are NOT
+# ============================================================================
+
+# One combined scope (system/Task.crus) satisfies every single-action Task check.
+test_combined_scope_task_search if {
+	data.umzh.authz.allow with input as req_in("GET", "Task", "", "system/Task.crus", org_a, [])
+}
+
+test_combined_scope_task_create if {
+	data.umzh.authz.allow with input as req_in("POST", "Task", "", "system/Task.crus", org_a, [])
+}
+
+# Wildcard resource scopes are NOT supported: `system/*.r` must not grant a read
+# on a concrete type (has_smart_scope matches the resource literally).
+test_wildcard_scope_denied if {
+	not data.umzh.authz.allow with input as req_in("GET", "Organization", "o1", "system/*.r", org_a, [])
+}
+
+test_wildcard_scope_denied_task if {
+	not data.umzh.authz.allow with input as req_in("GET", "Task", "", "system/*.crus", org_a, [])
 }
 
 # ============================================================================

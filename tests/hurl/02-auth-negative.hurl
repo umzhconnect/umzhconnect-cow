@@ -1,5 +1,5 @@
 # =============================================================================
-# 03-auth-negative — the external gateway rejects unauthenticated / bad-token
+# 02-auth-negative — the external gateway rejects unauthenticated / bad-token
 # requests before any policy or upstream is consulted (openid-connect,
 # bearer_only). No valid token needed to run this file.
 # =============================================================================
