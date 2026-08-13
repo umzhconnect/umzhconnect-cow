@@ -17,7 +17,7 @@
 services:
   # ── HAPI FHIR — this party's clinical data store (managed DB backend) ────────
   hapi-fhir:
-    image: hapiproject/hapi:v7.4.0
+    image: hapiproject/hapi:v8.10.0-3
     container_name: party-hapi-fhir
     environment:
       SPRING_CONFIG_LOCATION: file:///app/config/application.yaml

@@ -30,7 +30,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: hapi-fhir
-          image: hapiproject/hapi:v7.4.0
+          image: hapiproject/hapi:v8.10.0-3
           env:
             - name: SPRING_CONFIG_LOCATION
               value: file:///app/config/application.yaml
