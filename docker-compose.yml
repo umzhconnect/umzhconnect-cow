@@ -59,9 +59,6 @@ services:
       - ./clinical-orders/clinical-orders-proxy.conf.template:/etc/nginx/templates/default.conf.template:ro
     ports:
       - '${CLINICAL_ORDERS_FHIR_PORT}:8080'
-    depends_on:
-      hapi-fhir:
-        condition: service_started
     networks:
       - party-net
 
