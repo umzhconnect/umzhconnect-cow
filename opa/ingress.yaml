@@ -1,0 +1,50 @@
+# =============================================================================
+# opa-ingress — exposes OPA so an EXTERNAL integration platform (MuleSoft) can
+# query authorization decisions.
+#
+# ⚠️  SECURITY: OPA's REST API is powerful. The full API also allows WRITING data
+# and policies (PUT /v1/policies, PUT/PATCH /v1/data, /v1/compile, /v1/query),
+# so it must NOT be exposed wholesale. This ingress therefore publishes ONLY the
+# gateway ADAPTER decision entrypoint — /v1/data/umzh/authz/gateway — so external
+# consumers can POST a decision query (request + bearer) but cannot reach policy/
+# data management, other packages, OR the core /v1/data/umzh/authz/allow (which
+# trusts a caller-supplied fhir_base — see gateway.rego / requests/README).
+#
+# This is EDGE scoping, not authentication. OPA itself still trusts every caller
+# that reaches it, and even under this prefix an HTTP verb other than POST could
+# read/write base data at that path. So in front of this you MUST also:
+#   • terminate at the WAF / MuleSoft with the platform authenticated (mTLS or a
+#     gateway credential), and ideally restrict to POST; and/or
+#   • enable OPA's own API authn/authz (`--authentication`, `--authorization`)
+#     if OPA may be reached by anything but the trusted platform.
+# Keep the base HAPI and the rest of OPA's API off the public internet.
+# =============================================================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: opa-ingress
+  labels:
+    name: opa-ingress
+  annotations:
+    cert-manager.io/cluster-issuer: clusterissuer-acme-nginx
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: opa.dev.umzhc.io.usz.ch
+      http:
+        paths:
+          # Adapter decision entrypoint ONLY: POST /v1/data/umzh/authz/gateway/allow
+          # (request + bearer in → boolean out). Deliberately NOT the core
+          # /v1/data/umzh/authz/allow (caller-controlled fhir_base) nor bare
+          # /v1/data. Widen only if a consumer genuinely needs more.
+          - pathType: Prefix
+            path: '/v1/data/umzh/authz/gateway'
+            backend:
+              service:
+                name: opa
+                port:
+                  number: 8181
+  tls:
+    - hosts:
+        - opa.dev.umzhc.io.usz.ch
+      secretName: opa.dev.umzhc.io.usz.ch-cert

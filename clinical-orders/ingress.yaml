@@ -1,0 +1,34 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: clinical-orders-ingress
+  labels:
+    name: clinical-orders-ingress
+  annotations:
+    cert-manager.io/cluster-issuer: clusterissuer-acme-nginx
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: clinical-orders.dev.umzhc.io.usz.ch
+      http:
+        paths:
+          - pathType: Prefix
+            path: '/hello-world'
+            backend:
+              service:
+                name: hello-world
+                port:
+                  number: 80
+          # Outward-facing FHIR → APISIX external gateway (JWT + OPA) → the
+          # clinical-orders-fhir proxy → base HAPI 'clinical-orders' partition.
+          - pathType: Prefix
+            path: '/fhir'
+            backend:
+              service:
+                name: apisix-external
+                port:
+                  number: 9080
+  tls:
+    - hosts:
+        - clinical-orders.dev.umzhc.io.usz.ch
+      secretName: clinical-orders.dev.umzhc.io.usz.ch-cert

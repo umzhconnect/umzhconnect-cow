@@ -1,0 +1,35 @@
+meta {
+  name: Decide - Task create
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{opaUrl}}/v1/data/umzh/authz/gateway/allow
+  body: json
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "input": {
+      "request": {
+        "method": "POST",
+        "path": "/fhir/Task",
+        "query": {},
+        "headers": {
+          "authorization": "Bearer {{bearerToken}}"
+        }
+      }
+    }
+  }
+}
+
+docs {
+  May this caller create a Task (POST /fhir/Task)? Scope-only rule — allows when
+  the token carries system/Task.c (or system/Task.crus). OPA never sees the Task
+  body; it decides on the operation + token alone. Response: { "result": true|false }.
+}

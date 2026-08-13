@@ -1,0 +1,71 @@
+meta {
+  name: OPA-external
+}
+
+docs {
+  # OPA-external — the external decision contract
+
+  How an external consumer (a gateway / integration platform, e.g. MuleSoft) asks
+  OPA for an authorization decision.
+
+  **Endpoint:** `POST {{opaUrl}}/v1/data/umzh/authz/gateway/allow`
+
+  **You send** the FHIR request you are proxying + the client's bearer — nothing
+  else:
+
+  ```json
+  { "input": { "request": {
+      "method": "GET",
+      "path": "/fhir/Task",
+      "query": {},
+      "headers": { "authorization": "Bearer <token>" }
+  } } }
+  ```
+
+  **You get** `{ "result": true }` (allow) or `{ "result": false }` (deny).
+
+  ## What OPA actually reads from your token
+
+  OPA does **not** verify the signature (the consumer authenticates the token
+  first) — it **decodes** the bearer and reads three claims. A decoded access-token
+  payload looks like this:
+
+  ```json
+  {
+    "iss": "https://auth.umzhconnect.ch/realms/umzh-connect",
+    "sub": "fulfiller-client-l2",
+    "aud": "https://auth.umzhconnect.ch/realms/umzh-connect/protocol/openid-connect/token",
+    "exp": 1730000000,
+
+    "scope": "system/Task.crus system/ServiceRequest.r system/Patient.r",
+    "extensions": {
+      "umzhconnect": {
+        "organization_reference": "https://registry.umzhconnect.ch/fhir/Organization/HospitalB"
+      }
+    },
+    "fhirContext": [
+      { "reference": "ServiceRequest/sr-e2e" }
+    ]
+  }
+  ```
+
+  Only the **last three** drive the decision:
+
+  | Claim | Used for |
+  |---|---|
+  | `scope` | SMART scopes, space-delimited; combined letters are fine, e.g. `system/Task.crus` (= c+r+u+s) |
+  | `extensions.umzhconnect.organization_reference` | the caller's org — matched against the Consent actor and Task requester/owner |
+  | `fhirContext` | the ServiceRequest / Task graph(s) the caller is consented for |
+
+  `iss` / `aud` / `exp` / `sub` are for the consumer's own **authentication** step,
+  not OPA's decision. You pass **no** `fhir_base`, no scope, no org separately —
+  they come from the token (and, for `fhir_base`, OPA's own config).
+
+  ## Getting a bearer
+
+  Run the **Auth** folder (*Sign assertion* → *Exchange for token*) to mint one,
+  then copy the resulting `accessToken` into the `bearerToken` env var — or paste
+  any token from your auth server. Its scope / org / fhirContext decide the
+  outcome. The graph/consent requests (Task update, ServiceRequest search, read by
+  id) also need the stack up + seeded data (`tests/scripts/seed.sh up`).
+}

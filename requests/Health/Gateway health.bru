@@ -1,0 +1,13 @@
+meta {
+  name: Gateway health
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{gatewayUrl}}/healthz
+}
+
+docs {
+  Unauthenticated liveness probe on the external gateway. Expect 200 "ok".
+}

@@ -1,0 +1,37 @@
+meta {
+  name: Rule 2 - QuestionnaireResponse
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{opaUrl}}/v1/data/umzh/authz/allow
+  body: json
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "input": {
+      "method": "POST",
+      "resource_type": "QuestionnaireResponse",
+      "resource_id": "",
+      "path": "/fhir/QuestionnaireResponse",
+      "token": {
+        "organization_reference": "{{orgA}}",
+        "scope": "system/QuestionnaireResponse.c",
+        "fhir_context": []
+      },
+      "fhir_base": "{{opaFhirBase}}"
+    }
+  }
+}
+
+docs {
+  Rule 2 — QuestionnaireResponse operations. Scope only, no consent needed; the
+  action is derived from the method (POST → c). No HAPI fetch. Expect
+  { "result": true }.
+}

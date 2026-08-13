@@ -1,0 +1,41 @@
+# =============================================================================
+# Test overlay — brings up the mock OIDC issuer and points the external gateway
+# at it, so tokens can be validated without a real auth server.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.test.yml up -d --build
+#
+# The gateway is recreated with AUTH_DISCOVERY_URL pointing at mock-auth, so it
+# fetches the mock's JWKS on first token validation. Tear down the overlay (or run
+# `docker compose ... down`) to return to the normal auth server.
+# =============================================================================
+services:
+  # Throwaway OIDC issuer (see tests/mock-auth/). Test-only.
+  mock-auth:
+    build:
+      context: ./tests/mock-auth
+      dockerfile: Dockerfile
+    container_name: party-mock-auth
+    environment:
+      # The issuer/JWKS URL the GATEWAY uses (in-network name). Token `iss` matches.
+      ISSUER: http://mock-auth:8080
+    ports:
+      # Host port for the test harness to mint tokens.
+      - '${MOCK_AUTH_PORT:-9099}:8080'
+    networks:
+      - party-net
+
+  # Override only the discovery URL; OPA_URL / JWKS_UPSTREAM stay as in the base.
+  apisix-external:
+    environment:
+      AUTH_DISCOVERY_URL: http://mock-auth:8080/.well-known/openid-configuration
+    depends_on:
+      mock-auth:
+        condition: service_started
+
+  # Disable HAPI's search-result cache FOR TESTS ONLY, so a resource written in
+  # one step is immediately visible to a search in the next (base/prod keep the
+  # 60s cache for performance). Spring Boot env override of the mounted
+  # application.yaml property hapi.fhir.reuse_cached_search_results_millis.
+  hapi-fhir:
+    environment:
+      HAPI_FHIR_REUSE_CACHED_SEARCH_RESULTS_MILLIS: "-1"

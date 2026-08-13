@@ -1,0 +1,203 @@
+# APISIX routes for the clinical-orders external gateway (standalone mode).
+# Generated into the `apisix-external-config` ConfigMap by kustomize and mounted
+# at /usr/local/apisix/conf/apisix.yaml. The ${{...}} references are resolved by
+# APISIX at load time from the apisix-gateway-config env (AUTH_DISCOVERY_URL,
+# OPA_URL, JWKS_UPSTREAM).
+#
+# This mirrors the sandbox's public external gateway
+# (services/apisix/external/apisix.yaml): the SAME per-operation route surface,
+# the SAME request filter injection (umzh-task-requester-inject), and the SAME
+# security layers (openid-connect JWT → umzh-capability-guard → OPA umzh/authz/
+# gateway). Two things differ, both structural to the party deployment:
+#
+#   1. Upstream is the clinical-orders-fhir proxy, not the base HAPI. That proxy
+#      maps /fhir/… → /fhir/clinical-orders/… and strips the partition from
+#      response self-links. So — unlike the sandbox — these routes do NOT carry a
+#      partition-adding proxy-rewrite; the proxy owns partition mapping.
+#   2. The health path is /healthz (the Deployment readiness probe), where the
+#      sandbox uses /__health. Same purpose.
+routes:
+  # ─── Health check — unauthenticated, for the readiness probe ─────────────
+  - id: gw-health
+    uri: /healthz
+    methods: [GET]
+    priority: 100
+    plugins:
+      serverless-pre-function:
+        phase: access
+        functions:
+          - "return function() ngx.say('ok'); ngx.exit(200) end"
+
+  # ─── Public JWKS endpoint — NO auth, NO OPA ──────────────────────────────
+  # The external gateway is the party's public face: partner hospitals' IdPs hit
+  # it to verify our private_key_jwt client assertions, so the JWK Set lives at
+  # the same origin as the FHIR API (SMART Backend Services discovery shape).
+  # JWKS_UPSTREAM is the party's key custodian / JWKS host:port; the gateway
+  # container never mounts the keys itself.
+  - id: ext-jwks
+    uri: /jwks.json
+    methods: [GET]
+    priority: 100
+    upstream:
+      nodes:
+        "${{JWKS_UPSTREAM}}": 1
+      type: roundrobin
+
+  # ─── Task list — JWT + scope (system/Task.s) + server-side requester filter ─
+  # Scope-gated to require .s, and umzh-task-requester-inject sets
+  # ?requester=<organization_reference> (an absolute Registry URL) from the
+  # caller's token so HAPI only returns Tasks the caller requested; it overwrites
+  # any caller-supplied requester, so the filter cannot be widened. No
+  # proxy-rewrite here — the requester is a query arg (set via set_uri_args) and
+  # the partition is added downstream by clinical-orders-fhir.
+  - id: ext-task-list
+    uri: /fhir/Task
+    methods: [GET]
+    priority: 10
+    plugins:
+      openid-connect:
+        discovery: "${{AUTH_DISCOVERY_URL}}"
+        bearer_only: true
+        use_jwks: true
+        set_access_token_header: true
+        set_userinfo_header: false
+        client_id: "unused"
+        client_secret: "unused"
+      umzh-capability-guard:
+        allow_params: ["owner", "requester", "status", "_id"]
+        allow_includes:
+          - "Task:ch-umzhconnectig-task-inputreference"
+          - "Task:ch-umzhconnectig-task-outputreference"
+          - "Task:ch-umzhconnectig-task-outputcanonical"
+      opa:
+        host: "${{OPA_URL}}"
+        policy: "umzh/authz/gateway"
+      umzh-task-requester-inject: {}
+    upstream:
+      nodes:
+        "clinical-orders-fhir:8080": 1
+      type: roundrobin
+
+  # ─── Task create — JWT + OPA (Rule 1c: realm role + system/Task.c scope) ─
+  - id: ext-task-create
+    uri: /fhir/Task
+    methods: [POST]
+    priority: 10
+    plugins:
+      openid-connect:
+        discovery: "${{AUTH_DISCOVERY_URL}}"
+        bearer_only: true
+        use_jwks: true
+        set_access_token_header: true
+        set_userinfo_header: false
+        client_id: "unused"
+        client_secret: "unused"
+      opa:
+        host: "${{OPA_URL}}"
+        policy: "umzh/authz/gateway"
+    upstream:
+      nodes:
+        "clinical-orders-fhir:8080": 1
+      type: roundrobin
+
+  # ─── Task update — JWT + patchable-field guard (capability-guard) + OPA ─
+  - id: ext-task-update
+    uri: /fhir/Task/*
+    methods: [PATCH]
+    priority: 10
+    plugins:
+      openid-connect:
+        discovery: "${{AUTH_DISCOVERY_URL}}"
+        bearer_only: true
+        use_jwks: true
+        set_access_token_header: true
+        set_userinfo_header: false
+        client_id: "unused"
+        client_secret: "unused"
+      umzh-capability-guard:
+        patchable_fields: ["input", "owner", "focus", "businessStatus"]
+      opa:
+        host: "${{OPA_URL}}"
+        policy: "umzh/authz/gateway"
+    upstream:
+      nodes:
+        "clinical-orders-fhir:8080": 1
+      type: roundrobin
+
+  # ─── FHIR read by ID — capability-guard (no params) + OPA consent gate ─
+  # Matches /fhir/<type>/<id> (two path segments). One-segment paths (/fhir/Task,
+  # /fhir/ServiceRequest) are handled by the search routes above.
+  - id: ext-fhir-read
+    uri: /fhir/*
+    methods: [GET]
+    vars:
+      - - "uri"
+        - "~~"
+        - "^/fhir/[^/]+/[^/]+$"
+    priority: 5
+    plugins:
+      openid-connect:
+        discovery: "${{AUTH_DISCOVERY_URL}}"
+        bearer_only: true
+        use_jwks: true
+        set_access_token_header: true
+        set_userinfo_header: false
+        client_id: "unused"
+        client_secret: "unused"
+      umzh-capability-guard:
+        allow_params: []
+      opa:
+        host: "${{OPA_URL}}"
+        policy: "umzh/authz/gateway"
+    upstream:
+      nodes:
+        "clinical-orders-fhir:8080": 1
+      type: roundrobin
+
+  # ─── ServiceRequest search — capability-guard (_id required, enumerated
+  #     includes) + OPA consent gate. Only ServiceRequest is searchable
+  #     cross-party here; Task search is handled by ext-task-list above.
+  #     Clinical leaf types and QuestionnaireResponse have no search route, so a
+  #     search on them falls through to default-deny (404).
+  - id: ext-sr-search
+    uri: /fhir/ServiceRequest
+    methods: [GET]
+    priority: 10
+    plugins:
+      openid-connect:
+        discovery: "${{AUTH_DISCOVERY_URL}}"
+        bearer_only: true
+        use_jwks: true
+        set_access_token_header: true
+        set_userinfo_header: false
+        client_id: "unused"
+        client_secret: "unused"
+      umzh-capability-guard:
+        require: ["_id"]
+        allow_params: ["_id"]
+        allow_includes:
+          - "ServiceRequest:patient"
+          - "ServiceRequest:subject"
+          - "ServiceRequest:requester"
+          - "ServiceRequest:ch-umzhconnectig-servicerequest-reasonreference"
+          - "ServiceRequest:ch-umzhconnectig-servicerequest-supportinginfo"
+          - "ServiceRequest:ch-umzhconnectig-servicerequest-insurance"
+      opa:
+        host: "${{OPA_URL}}"
+        policy: "umzh/authz/gateway"
+    upstream:
+      nodes:
+        "clinical-orders-fhir:8080": 1
+      type: roundrobin
+
+global_rules:
+  - id: 1
+    plugins:
+      cors:
+        allow_origins: "**"
+        allow_methods: "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+        allow_headers: "Authorization,Content-Type,Accept"
+        expose_headers: "Content-Length,Content-Type,Location"
+        max_age: 43200
+        allow_credential: true
+#END

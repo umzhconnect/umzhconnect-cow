@@ -1,0 +1,18 @@
+# APISIX data-plane (standalone, yaml config provider) for the clinical-orders
+# external gateway. Generated into the `apisix-external-config` ConfigMap by
+# kustomize and mounted at /usr/local/apisix/conf/config.yaml.
+apisix:
+  node_listen: 9080
+  enable_ipv6: false
+deployment:
+  role: data_plane
+  role_data_plane:
+    config_provider: yaml
+# APISIX only loads plugins enumerated here.
+plugins:
+  - cors
+  - openid-connect
+  - opa
+  - serverless-pre-function
+  - umzh-capability-guard
+  - umzh-task-requester-inject

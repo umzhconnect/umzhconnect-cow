@@ -1,0 +1,68 @@
+{
+  "resourceType": "Bundle",
+  "type": "transaction",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "pat-e2e",
+        "name": [{ "family": "E2E", "given": ["Test"] }],
+        "gender": "female"
+      },
+      "request": { "method": "PUT", "url": "Patient/pat-e2e" }
+    },
+    {
+      "resource": {
+        "resourceType": "ServiceRequest",
+        "id": "sr-e2e",
+        "status": "active",
+        "intent": "order",
+        "subject": { "reference": "Patient/pat-e2e" },
+        "code": { "text": "Orthopedic referral (e2e test)" }
+      },
+      "request": { "method": "PUT", "url": "ServiceRequest/sr-e2e" }
+    },
+    {
+      "resource": {
+        "resourceType": "Consent",
+        "id": "consent-e2e",
+        "status": "active",
+        "scope": {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/consentscope",
+              "code": "patient-privacy"
+            }
+          ]
+        },
+        "category": [
+          { "coding": [{ "system": "http://loinc.org", "code": "59284-0" }] }
+        ],
+        "patient": { "reference": "Patient/pat-e2e" },
+        "provision": {
+          "type": "permit",
+          "actor": [
+            {
+              "role": {
+                "coding": [
+                  {
+                    "system": "http://terminology.hl7.org/CodeSystem/v3-ParticipationType",
+                    "code": "IRCP"
+                  }
+                ]
+              },
+              "reference": { "reference": "__CALLER_ORG__" }
+            }
+          ],
+          "data": [
+            {
+              "meaning": "instance",
+              "reference": { "reference": "ServiceRequest/sr-e2e" }
+            }
+          ]
+        }
+      },
+      "request": { "method": "PUT", "url": "Consent/consent-e2e" }
+    }
+  ]
+}

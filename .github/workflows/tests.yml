@@ -1,0 +1,125 @@
+# =============================================================================
+# PR checks — runs the two test suites this node ships with:
+#
+#   1. opa-tests          hermetic OPA policy unit tests (no stack, no DB)
+#   2. integration-tests  full compose stack + test overlay, driven by hurl
+#
+# The integration suite needs the "managed" Postgres the compose files expect at
+# ${DB_HOST}:${DB_PORT}. In CI we stand up a throwaway Postgres as a GitHub
+# Actions service container (see the `services:` block below) and let the compose
+# containers reach it over host.docker.internal — mirroring the local setup
+# documented in .env.example (the 'umzhconnect' role, pre-created hapi_fhir DB).
+# =============================================================================
+name: tests
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Hermetic OPA policy unit tests ─────────────────────────────────────────
+  opa-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # opa-test.sh uses the opa binary if present, else the OPA docker image.
+      # ubuntu-latest has Docker, so no install step is needed.
+      - name: Run OPA unit tests
+        run: tests/scripts/opa-test.sh
+
+  # ── Proxy backend-auth e2e (hermetic: nginx + echo upstream, no full stack) ─
+  proxy-backend-auth-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Asserts the clinical-orders proxy injects the configured Authorization
+      # upstream when PROXY_BACKEND_AUTHORIZATION is set, and passes the caller's
+      # header through when empty. Needs only Docker + curl (present on
+      # ubuntu-latest).
+      - name: Run proxy backend-auth e2e test
+        run: tests/scripts/backend-auth-test.sh
+
+  # ── Full-stack integration tests ───────────────────────────────────────────
+  integration-tests:
+    runs-on: ubuntu-latest
+
+    # Throwaway Postgres standing in for the managed/external DB. It publishes
+    # 5432 on the runner host; the compose containers (which carry
+    # extra_hosts: host.docker.internal:host-gateway) reach it via
+    # host.docker.internal — the value DB_HOST already defaults to in
+    # .env.example. Credentials/DB name match the .env.example defaults, so the
+    # committed `.env.example` can be used verbatim (see the Configure step).
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: umzhconnect
+          POSTGRES_PASSWORD: umzhconnect
+          POSTGRES_DB: hapi_fhir
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U umzhconnect -d hapi_fhir"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install hurl
+        env:
+          HURL_VERSION: 5.0.1
+        run: |
+          curl -fsSL \
+            "https://github.com/Orange-OpenSource/hurl/releases/download/${HURL_VERSION}/hurl_${HURL_VERSION}_amd64.deb" \
+            -o /tmp/hurl.deb
+          sudo dpkg -i /tmp/hurl.deb
+          hurl --version
+
+      - name: Configure node (.env + L2 keys)
+        run: |
+          # DB defaults in .env.example already point at host.docker.internal:5432
+          # / hapi_fhir / umzhconnect / umzhconnect, which is exactly what the
+          # Postgres service above provides — so no edits are needed.
+          cp .env.example .env
+          # Generate this party's L2 signing key + JWKS (gitignored; must exist
+          # before the key-custodian container starts).
+          keys/gen-keys.sh l2
+
+      - name: Bring up the stack (with test overlay)
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.test.yml \
+            up -d --build
+
+      - name: Run integration tests
+        env:
+          # HAPI (Spring Boot) can be slow to answer on a cold CI runner; give
+          # wait-for-services.sh more headroom than its 120s default.
+          MAX_WAIT: "300"
+        run: tests/scripts/run-tests.sh
+
+      - name: Dump compose logs on failure
+        if: failure()
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.test.yml \
+            logs --no-color --timestamps
+
+      - name: Upload JUnit reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hurl-junit-reports
+          path: tests/reports/*.xml
+          if-no-files-found: warn
+
+      - name: Tear down
+        if: always()
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.test.yml \
+            down -v --remove-orphans

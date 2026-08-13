@@ -1,0 +1,37 @@
+meta {
+  name: Rule 1c - Task create
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{opaUrl}}/v1/data/umzh/authz/allow
+  body: json
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "input": {
+      "method": "POST",
+      "resource_type": "Task",
+      "resource_id": "",
+      "path": "/fhir/Task",
+      "token": {
+        "organization_reference": "{{orgA}}",
+        "scope": "system/Task.c",
+        "fhir_context": []
+      },
+      "fhir_base": "{{opaFhirBase}}"
+    }
+  }
+}
+
+docs {
+  Rule 1c — Task create (POST). Scope check only (system/Task.c): the caller
+  creates a Task OWNED by the partner, so ownership can't be required here. No
+  HAPI fetch. Expect { "result": true }.
+}

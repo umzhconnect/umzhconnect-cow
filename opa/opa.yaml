@@ -1,0 +1,136 @@
+# =============================================================================
+# OPA — consent / fhirContext policy engine (namespace: opa).
+#
+# The external gateway (clinical-orders namespace) calls this at
+# opa.opa.svc.cluster.local:8181 (its OPA_URL). OPA in turn reads the live
+# Consent/Task/ServiceRequest it needs DIRECTLY from the base HAPI — not through
+# the clinical-orders proxy: OPA is an internal consumer of the source of truth,
+# so it uses the explicit partition path and skips the outward proxy's
+# partition-hiding / self-link rewriting (which only matter to external callers)
+# and its extra hop on the policy hot path.
+#
+# The rego policies are shared with docker compose (generated into the
+# `opa-policies` ConfigMap from opa/policies/*.rego). Only the data document
+# differs by environment — fhir_base must be the in-cluster HAPI address — so it
+# is a k8s-specific ConfigMap here (compose uses opa/opa-config.json with the
+# service name `hapi-fhir:8080`).
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opa-config
+data:
+  # OPA's data document. Static; distroless OPA can't envsubst, so the value is
+  # baked per environment. Points DIRECTLY at the base HAPI's clinical-orders
+  # partition (cross-namespace FQDN).
+  opa-config.json: |
+    {
+      "config": {
+        "fhir_base": "http://hapi-fhir.hapi-fhir.svc.cluster.local:8080/fhir/clinical-orders"
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opa
+  labels:
+    app: opa
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: opa
+  template:
+    metadata:
+      labels:
+        app: opa
+    spec:
+      # "restricted" PSS — OPA is a static binary that writes nothing to disk in
+      # server mode (policies/config are read-only mounts), so it runs happily as
+      # an arbitrary non-root UID.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: opa
+          image: openpolicyagent/opa:0.70.0
+          args:
+            - run
+            - --server
+            - --addr=0.0.0.0:8181
+            - --log-level=info
+            # A ConfigMap volume mounts files alongside a `..data` symlink and a
+            # `..<timestamp>` dir, so a recursive load of /policies would read each
+            # policy TWICE (→ "multiple default rules"). Skip the dot-prefixed
+            # entries; the top-level symlinks (main.rego, gateway.rego) still load.
+            - --ignore=.*
+            - /policies
+            - /config/opa-config.json
+          env:
+            # OPTIONAL Authorization header OPA attaches to its FHIR fetches when
+            # the HAPI requires credentials (read via opa.runtime().env in
+            # gateway.rego). Kept in a Secret, not the ConfigMap. optional:true ⇒
+            # the deployment works with no such Secret (env unset → no header).
+            # Enable with:
+            #   kubectl -n opa create secret generic opa-backend-fhir-auth \
+            #     --from-literal=authorization='Basic <base64(user:pass)>'
+            - name: FHIR_BACKEND_AUTHORIZATION
+              valueFrom:
+                secretKeyRef:
+                  name: opa-backend-fhir-auth
+                  key: authorization
+                  optional: true
+          ports:
+            - containerPort: 8181
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: policies
+              mountPath: /policies
+            - name: config
+              mountPath: /config
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8181
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8181
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+      volumes:
+        - name: policies
+          configMap:
+            name: opa-policies
+        - name: config
+          configMap:
+            name: opa-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: opa
+  labels:
+    app: opa
+spec:
+  selector:
+    app: opa
+  ports:
+    - port: 8181
+      targetPort: 8181

@@ -1,0 +1,19 @@
+namespace: opa
+
+resources:
+  - ns.yaml
+  - opa.yaml
+  - ingress.yaml
+
+# The rego policies are the SAME files docker compose bind-mounts; generate them
+# into the `opa-policies` ConfigMap (mounted at /policies). The data document
+# (opa-config.json) is NOT generated here — it differs by environment (the
+# in-cluster HAPI address), so it lives as the `opa-config` ConfigMap in opa.yaml.
+configMapGenerator:
+  - name: opa-policies
+    files:
+      - gateway.rego=policies/gateway.rego
+      - main.rego=policies/main.rego
+
+generatorOptions:
+  disableNameSuffixHash: true

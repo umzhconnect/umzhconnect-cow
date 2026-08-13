@@ -1,0 +1,44 @@
+meta {
+  name: Rule 4 - ServiceRequest graph read
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{opaUrl}}/v1/data/umzh/authz/allow
+  body: json
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "input": {
+      "method": "GET",
+      "resource_type": "Patient",
+      "resource_id": "pat-e2e",
+      "path": "/fhir/Patient/pat-e2e",
+      "token": {
+        "organization_reference": "{{orgA}}",
+        "scope": "system/Patient.r",
+        "fhir_context": [
+          { "reference": "ServiceRequest/sr-e2e" }
+        ]
+      },
+      "fhir_base": "{{opaFhirBase}}"
+    }
+  }
+}
+
+docs {
+  Rule 4 — read within a ServiceRequest fhirContext graph. Requires
+  system/<Type>.r AND an active, non-expired Consent (actor == caller) for the
+  ServiceRequest context AND the requested resource is in that SR's graph.
+
+  DATA-DEPENDENT: OPA fetches Consent?data=ServiceRequest/sr-e2e and
+  ServiceRequest/sr-e2e. True only when those exist (the placer seed —
+  tests/scripts/seed.sh — creates sr-e2e, pat-e2e, and a Consent naming
+  {{orgA}}). Change resource_id to one NOT in the graph (e.g. pat-other) to deny.
+}

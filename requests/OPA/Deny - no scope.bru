@@ -1,0 +1,37 @@
+meta {
+  name: Deny - no scope
+  type: http
+  seq: 11
+}
+
+post {
+  url: {{opaUrl}}/v1/data/umzh/authz/allow
+  body: json
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "input": {
+      "method": "GET",
+      "resource_type": "Task",
+      "resource_id": "",
+      "path": "/fhir/Task",
+      "token": {
+        "organization_reference": "{{orgA}}",
+        "scope": "system/Patient.r",
+        "fhir_context": []
+      },
+      "fhir_base": "{{opaFhirBase}}"
+    }
+  }
+}
+
+docs {
+  Default-deny sanity check. A Task search WITHOUT system/Task.s (here the token
+  only holds system/Patient.r) matches no rule → { "result": false }. This is the
+  `default allow := false` baseline every rule opts out of.
+}

@@ -1,0 +1,41 @@
+meta {
+  name: Rule 1d - Task patch
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{opaUrl}}/v1/data/umzh/authz/allow
+  body: json
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "input": {
+      "method": "PATCH",
+      "resource_type": "Task",
+      "resource_id": "task-e2e",
+      "path": "/fhir/Task/task-e2e",
+      "token": {
+        "organization_reference": "{{orgB}}",
+        "scope": "system/Task.u",
+        "fhir_context": []
+      },
+      "fhir_base": "{{opaFhirBase}}"
+    }
+  }
+}
+
+docs {
+  Rule 1d — Task update (PATCH). Requires system/Task.u AND the fetched Task's
+  owner == organization_reference (owner-only writes keep the Task graph
+  trustworthy).
+
+  DATA-DEPENDENT: OPA fetches fhir_base/Task/task-e2e. True only if that Task
+  exists with owner.reference == {{orgB}}. In the fulfiller scenario THIS node is
+  the owner, so orgB models the owning party.
+}

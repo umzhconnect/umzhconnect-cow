@@ -1,0 +1,37 @@
+meta {
+  name: Rule 5 - metadata
+  type: http
+  seq: 9
+}
+
+post {
+  url: {{opaUrl}}/v1/data/umzh/authz/allow
+  body: json
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "input": {
+      "method": "GET",
+      "resource_type": "metadata",
+      "resource_id": "",
+      "path": "/fhir/metadata",
+      "token": {
+        "organization_reference": "",
+        "scope": "",
+        "fhir_context": []
+      },
+      "fhir_base": "{{opaFhirBase}}"
+    }
+  }
+}
+
+docs {
+  Rule 5 — the CapabilityStatement is always allowed. Matches on
+  path == "/fhir/metadata" alone — no scope, no token, no HAPI fetch. Expect
+  { "result": true } even with an empty token.
+}

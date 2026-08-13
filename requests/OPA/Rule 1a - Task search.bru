@@ -1,0 +1,38 @@
+meta {
+  name: Rule 1a - Task search
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{opaUrl}}/v1/data/umzh/authz/allow
+  body: json
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "input": {
+      "method": "GET",
+      "resource_type": "Task",
+      "resource_id": "",
+      "path": "/fhir/Task",
+      "token": {
+        "organization_reference": "{{orgA}}",
+        "scope": "system/Task.s",
+        "fhir_context": []
+      },
+      "fhir_base": "{{opaFhirBase}}"
+    }
+  }
+}
+
+docs {
+  Rule 1a — Task search. Requires system/Task.s AND a non-empty
+  organization_reference (the gateway then injects ?requester=<org> to scope the
+  results). Pure scope/identity check — no HAPI fetch. Expect { "result": true }.
+  Drop the scope to system/Patient.r to see it deny.
+}

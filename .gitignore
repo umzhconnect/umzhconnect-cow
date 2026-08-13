@@ -11,3 +11,16 @@ opa-debug-js
 *.api-txt
 *.exe
 *.log
+
+# ── umzhconnect-cow ──────────────────────────────────────────────────────────
+# Local deployment config (copy from .env.example)
+.env
+# macOS folder metadata
+.DS_Store
+# L2 signing material — generate locally with keys/gen-keys.sh; NEVER commit the
+# private key. The public JWKS is regenerated alongside it, so ignore both.
+keys/l2.key
+keys/l2.jwks.json
+
+# ── tests ───────────────────────────────────────────────────────────────────
+tests/reports/*.xml

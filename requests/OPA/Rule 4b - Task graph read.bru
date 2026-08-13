@@ -1,0 +1,43 @@
+meta {
+  name: Rule 4b - Task graph read
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{opaUrl}}/v1/data/umzh/authz/allow
+  body: json
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "input": {
+      "method": "GET",
+      "resource_type": "DocumentReference",
+      "resource_id": "doc-e2e",
+      "path": "/fhir/DocumentReference/doc-e2e",
+      "token": {
+        "organization_reference": "{{orgA}}",
+        "scope": "system/DocumentReference.r",
+        "fhir_context": [
+          { "reference": "Task/task-e2e" }
+        ]
+      },
+      "fhir_base": "{{opaFhirBase}}"
+    }
+  }
+}
+
+docs {
+  Rule 4b — read within a Task fhirContext graph (mirrors Rule 4 for Task-rooted
+  contexts). Requires system/<Type>.r AND an active Consent for the Task context
+  AND the requested resource is referenced in Task.output[].valueReference.
+
+  DATA-DEPENDENT: OPA fetches Consent?data=Task/task-e2e and Task/task-e2e. True
+  only when a Consent naming {{orgA}} exists AND Task.output references
+  DocumentReference/doc-e2e.
+}
