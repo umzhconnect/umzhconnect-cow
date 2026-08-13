@@ -160,11 +160,11 @@ services:
   # ── One-shot: create this party's clinical-orders partition (owned by that ──
   # service; left empty — records arrive at runtime through the proxy).
   clinical-orders-init:
-    image: alpine:3.19
+    image: curlimages/curl:8.11.1
     container_name: party-clinical-orders-init
     environment:
       FHIR_BASE: http://hapi-fhir:8080/fhir
-    entrypoint: ["/bin/sh", "-c", "apk add --no-cache curl >/dev/null && sh /init/create-partition.sh"]
+    entrypoint: ["/bin/sh", "/init/create-partition.sh"]
     volumes:
       - ./clinical-orders/create-partition.sh:/init/create-partition.sh:ro
     depends_on:
