@@ -65,6 +65,8 @@ echo "    echo upstream ready"
 run_proxy() {  # run_proxy <container> <host-port> <PROXY_BACKEND_AUTHORIZATION>
     docker run -d --rm --name "$1" --network "$NET" -p "$2:8080" \
         -e PROXY_UPSTREAM="echo:8080" \
+        -e PROXY_UPSTREAM_SCHEME="http" \
+        -e PROXY_UPSTREAM_PATH="/fhir" \
         -e PROXY_OUTWARD_URL="http://localhost:$2" \
         -e PROXY_INTERNAL_BASE="http://localhost:8090/fhir" \
         -e PROXY_BACKEND_AUTHORIZATION="$3" \

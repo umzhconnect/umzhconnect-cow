@@ -2,6 +2,8 @@ spring:
   main:
     # Required for HAPI FHIR v7.x — known circular dependency in SearchParamRegistry
     allow-circular-references: true
+  flyway:
+    enabled: false
   datasource:
     # Managed (external) PostgreSQL. NO host or credentials are baked into this
     # file — every value is injected from the environment, so the SAME file works
