@@ -2,8 +2,9 @@
 
 Everything **one hospital** runs to be a compatible UMZH Connect ecosystem
 partner. Shared infrastructure — the **auth server**, the **mCSD registry**, and
-the **partner** itself — is *external* and supplied via `.env`; it is never
-deployed here.
+the **partner** itself — is *external* and never deployed here. Only the auth
+server is supplied via `.env`; the registry and the partner are reached
+directly by callers, out-of-band.
 
 This is a **self-contained** single-party deployment: the external gateway
 (config + plugins), the OPA policies, and the key-custodian all live in this
@@ -59,8 +60,7 @@ The **partition layout** is created at seed time on the managed instance:
 | `clinical-orders` | This party's clinical data (acts as the fulfiller). Created empty; records arrive at runtime. |
 
 > The mCSD **registry** used to be a second partition here; it is now its own
-> self-contained deployment (see the `umzhconnect-registry` repo) and is consumed
-> as external infrastructure via `REGISTRY_URL`.
+> self-contained deployment (see the `umzhconnect-registry` repo).
 
 ### Partition-less proxy
 
@@ -177,8 +177,6 @@ controller and keeps the simpler `nginx:alpine`/`alpine` images.
 | `.env` key | Meaning |
 |---|---|
 | `AUTH_SERVER_URL` + `AUTH_SERVER_REALM` | The ecosystem OIDC provider. Issues all tokens; the gateways validate against its discovery/JWKS. |
-| `PARTNER_EXTERNAL_URL` | The partner hospital's external gateway (cross-party reads/writes go here directly). |
-| `REGISTRY_URL` | The shared mCSD Organization/Endpoint registry. |
 
 ## Prerequisite: register this party in the auth server
 
@@ -204,8 +202,8 @@ keys/gen-keys.sh l2                     # writes keys/l2.{key,jwks.json}, kid=l2
 
 # 2) configure
 cp .env.example .env
-# edit .env — at minimum PARTY, the AUTH_SERVER/PARTNER/REGISTRY URLs, and
-# OWN_EXTERNAL_URL (must match the jwks.url registered above)
+# edit .env — at minimum PARTY, AUTH_SERVER_URL, and OWN_EXTERNAL_URL
+# (must match the jwks.url registered above)
 
 # 3) run
 docker compose up -d --build
@@ -235,14 +233,14 @@ Bruno collection for manual exploration. See `tests/README.md` and
 
 A cross-party read then flows: this party's caller → mint an M2M token at the
 auth server (assertion signed by `key-custodian`, fhirContext via RFC 9396
-`authorization_details`) → call `PARTNER_EXTERNAL_URL` directly. No internal
-proxy is involved.
+`authorization_details`) → call the partner's external gateway directly. No
+internal proxy is involved.
 
 ## Trying it against the sandbox
 
-The `.env.example` defaults point at the running root sandbox as the "external"
-ecosystem (`host.docker.internal:8180` auth, `:8084` registry, `:8081` partner)
-and deploy this node **as the fulfiller**, reusing the committed
+The `.env.example` defaults point `AUTH_SERVER_URL` at the running root
+sandbox's Keycloak (`host.docker.internal:8180`) and deploy this node **as the
+fulfiller**, reusing the committed
 `fulfiller-client-l2` key. Because the JWK Set is the same committed key the
 sandbox already registered, the sandbox Keycloak can verify assertions this
 node's custodian signs. Set distinct host ports (defaults: 9080/9081/9090/…) so
@@ -252,8 +250,8 @@ it can run alongside the sandbox.
 
 - **The mCSD registry is external.** It is its own self-contained deployment
   (`umzhconnect-registry` repo — Organizations/Endpoints/HealthcareServices); this
-  node consumes it via `REGISTRY_URL` and never hosts it. The `clinical-orders`
-  partition is intentionally seedless — it holds this party's runtime data.
+  node never hosts it. The `clinical-orders` partition is intentionally
+  seedless — it holds this party's runtime data.
 - **DB credentials** are never baked into `hapi-fhir/application.yaml` — it is pure
   `${DB_*}` placeholders. Values come from `.env` (compose) or the
   `managed-db-config` ConfigMap / a Secret (k8s). The `managed-postgres`

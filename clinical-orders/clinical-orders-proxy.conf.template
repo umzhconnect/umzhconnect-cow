@@ -1,22 +1,34 @@
 # =============================================================================
 # clinical-orders FHIR proxy — outward, partition-less endpoint in front of the
-# partitioned base HAPI. SHARED by docker compose AND Kubernetes: this file is
-# mounted at /etc/nginx/templates/default.conf.template and rendered at container
-# start by the official nginx image's built-in envsubst. Only ${PROXY_*} are
-# substituted (NGINX_ENVSUBST_FILTER=PROXY_); nginx's own $host / $1 survive.
+# base FHIR store (a local partitioned HAPI, or an external server fronted
+# directly). SHARED by docker compose AND Kubernetes: this file is mounted at
+# /etc/nginx/templates/default.conf.template and rendered at container start by
+# the official nginx image's built-in envsubst. Only ${PROXY_*} are substituted
+# (NGINX_ENVSUBST_FILTER=PROXY_); nginx's own $host / $1 survive.
 #
-#   inbound   /fhir/…            → /fhir/clinical-orders/…   (on ${PROXY_UPSTREAM})
-#   outbound  the partition segment is stripped from self-links (sub_filter) and
+#   inbound   /fhir/…  → ${PROXY_UPSTREAM_PATH}/…   (on ${PROXY_UPSTREAM})
+#   outbound  ${PROXY_INTERNAL_BASE} is stripped from self-links (sub_filter) and
 #             the Location header (proxy_redirect); Content-Location is dropped —
-#             so the partition never appears in an outward URL.
+#             so the backend's real base URL never appears outward.
 #
-# Host values (${PROXY_UPSTREAM}, ${PROXY_OUTWARD_URL}, ${PROXY_INTERNAL_BASE})
-# come from the environment (.env for compose; Deployment env for k8s).
-# PROXY_INTERNAL_BASE is the base URL HAPI advertises in self-links (its
-# server_address / FHIR_SERVER_ADDRESS), defaulting to the sentinel
-# http://localhost:8090/fhir; the rewrites below key off it, so it MUST match
-# whatever HAPI actually emits. The partition name is structural and stays
-# literal here.
+# Host values (${PROXY_UPSTREAM}, ${PROXY_OUTWARD_URL}, ${PROXY_INTERNAL_BASE},
+# ${PROXY_UPSTREAM_PATH}, ${PROXY_UPSTREAM_SCHEME}) come from the environment
+# (.env for compose; Deployment env for k8s):
+#   PROXY_UPSTREAM       bare host:port nginx proxies to (an nginx `upstream`
+#                        server can't carry a scheme or path).
+#   PROXY_UPSTREAM_SCHEME scheme nginx uses to CONNECT to PROXY_UPSTREAM — http
+#                        (default) for the local base HAPI, https for an
+#                        external server that requires TLS.
+#   PROXY_UPSTREAM_PATH  the request path prefix on that upstream — e.g.
+#                        /fhir/clinical-orders for the local partitioned base
+#                        HAPI, or an external server's own base path (e.g.
+#                        /UMZHCONNECT) when fronting one of those directly.
+#   PROXY_INTERNAL_BASE  the backend's OWN advertised base URL, in full — i.e.
+#                        exactly what a resource's self-link/fullUrl starts
+#                        with (partition included, if any). Sentinel default
+#                        http://localhost:8090/fhir/clinical-orders. MUST match
+#                        whatever the backend actually emits, or the rewrites
+#                        below silently no-op (no match found).
 #
 # OPTIONAL backend auth (clinical-orders only): ${PROXY_BACKEND_AUTHORIZATION} is
 # the full Authorization header value to send UPSTREAM to the backend FHIR store
@@ -53,9 +65,11 @@ server {
         # PROXY_BACKEND_AUTHORIZATION is set, so nothing is intercepted by default.
         set               $backend_authorization "${PROXY_BACKEND_AUTHORIZATION}";
 
-        # /fhir(/...)  ->  /fhir/clinical-orders(/...)  on the base.
-        rewrite ^/fhir(/.*)?$ /fhir/clinical-orders$1 break;
-        proxy_pass        http://hapi_base;
+        # /fhir(/...)  ->  ${PROXY_UPSTREAM_PATH}(/...)  on the base.
+        rewrite ^/fhir(/.*)?$ ${PROXY_UPSTREAM_PATH}$1 break;
+        proxy_pass        ${PROXY_UPSTREAM_SCHEME}://hapi_base;
+        # SNI for an https upstream (ignored — harmless — over plain http).
+        proxy_ssl_server_name on;
         proxy_set_header  Host            $host;
         proxy_set_header  X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header  Accept-Encoding "";
@@ -63,16 +77,15 @@ server {
 
         sub_filter_once  off;
         sub_filter_types *;
-        # HAPI builds self-links from its server_address (${PROXY_INTERNAL_BASE})
-        # + partition; rewrite that host+partition to the partition-less outward
-        # base URL. The second rule strips the partition from any remaining
-        # relative occurrence.
-        sub_filter "${PROXY_INTERNAL_BASE}/clinical-orders/" "${PROXY_OUTWARD_URL}/fhir/";
-        sub_filter "/fhir/clinical-orders/" "/fhir/";
+        # Rewrite the backend's own base URL in self-links to the partition-less
+        # outward base URL. The second rule catches any remaining RELATIVE
+        # occurrence (backend-path-rooted, no host) the same way.
+        sub_filter "${PROXY_INTERNAL_BASE}/" "${PROXY_OUTWARD_URL}/fhir/";
+        sub_filter "${PROXY_UPSTREAM_PATH}/" "/fhir/";
 
         # sub_filter only touches the body — also fix the Location header on
         # create/update, and drop the duplicate (leaking) Content-Location.
-        proxy_redirect    "${PROXY_INTERNAL_BASE}/clinical-orders/" "${PROXY_OUTWARD_URL}/fhir/";
+        proxy_redirect    "${PROXY_INTERNAL_BASE}/" "${PROXY_OUTWARD_URL}/fhir/";
         proxy_hide_header Content-Location;
     }
 }

@@ -17,7 +17,7 @@
 services:
   # ── HAPI FHIR — this party's clinical data store (managed DB backend) ────────
   hapi-fhir:
-    image: hapiproject/hapi:v7.4.0
+    image: hapiproject/hapi:v8.10.0-3
     container_name: party-hapi-fhir
     environment:
       SPRING_CONFIG_LOCATION: file:///app/config/application.yaml
@@ -45,10 +45,19 @@ services:
     container_name: party-clinical-orders-fhir
     environment:
       PROXY_UPSTREAM: ${HAPI_BASE_UPSTREAM}
+      # Scheme nginx uses to CONNECT to PROXY_UPSTREAM — http for the local
+      # base HAPI (default); https for an external server that requires TLS.
+      PROXY_UPSTREAM_SCHEME: ${PROXY_UPSTREAM_SCHEME:-http}
+      # Request path prefix on PROXY_UPSTREAM — the local base HAPI's partition
+      # by default; set to an external server's own base path to front that
+      # instead (see clinical-orders-proxy.conf.template).
+      PROXY_UPSTREAM_PATH: ${PROXY_UPSTREAM_PATH:-/fhir/clinical-orders}
       PROXY_OUTWARD_URL: ${CLINICAL_ORDERS_FHIR_URL}
-      # Base URL HAPI advertises in self-links (must equal its server_address);
-      # the sentinel default matches HAPI's default when fronted by this proxy.
-      PROXY_INTERNAL_BASE: ${PROXY_INTERNAL_BASE:-http://localhost:8090/fhir}
+      # The backend's own advertised base URL, in full (partition included) —
+      # exactly what its self-links start with. The sentinel default matches
+      # HAPI's default server_address + this partition, when fronted by this
+      # proxy.
+      PROXY_INTERNAL_BASE: ${PROXY_INTERNAL_BASE:-http://localhost:8090/fhir/clinical-orders}
       # OPTIONAL: full Authorization header sent upstream to the backend FHIR
       # store (e.g. "Basic <base64(user:pass)>"). Empty = disabled (default);
       # always DEFINED so envsubst renders it (an undefined var would leak the
@@ -59,9 +68,6 @@ services:
       - ./clinical-orders/clinical-orders-proxy.conf.template:/etc/nginx/templates/default.conf.template:ro
     ports:
       - '${CLINICAL_ORDERS_FHIR_PORT}:8080'
-    depends_on:
-      hapi-fhir:
-        condition: service_started
     networks:
       - party-net
 
@@ -160,11 +166,11 @@ services:
   # ── One-shot: create this party's clinical-orders partition (owned by that ──
   # service; left empty — records arrive at runtime through the proxy).
   clinical-orders-init:
-    image: alpine:3.19
+    image: curlimages/curl:8.11.1
     container_name: party-clinical-orders-init
     environment:
       FHIR_BASE: http://hapi-fhir:8080/fhir
-    entrypoint: ["/bin/sh", "-c", "apk add --no-cache curl >/dev/null && sh /init/create-partition.sh"]
+    entrypoint: ["/bin/sh", "/init/create-partition.sh"]
     volumes:
       - ./clinical-orders/create-partition.sh:/init/create-partition.sh:ro
     depends_on:

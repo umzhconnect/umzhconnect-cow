@@ -1,6 +1,29 @@
 # Backlog
 
-Tracked improvements that are deliberately deferred (not functional gaps).
+Tracked improvements that are deliberately deferred (not functional gaps),
+plus known gaps below that block a specific next step.
+
+## k8s clinical-orders-proxy.yaml out of sync with the shared proxy template
+
+**Status:** known gap — will break k8s on next deploy. **Area:**
+`clinical-orders/clinical-orders-proxy.yaml`, `clinical-orders/clinical-orders-proxy.conf.template`.
+
+The nginx template is shared between docker compose and k8s (mounted into the
+k8s Deployment via ConfigMap). It now expects two env vars that the k8s
+manifest doesn't set/hasn't updated:
+
+- `PROXY_UPSTREAM_PATH` — new. Unset in k8s ⇒ envsubst substitutes empty ⇒ the
+  inbound rewrite becomes a no-op passthrough instead of prefixing the
+  `clinical-orders` partition ⇒ requests hit the wrong path on the base HAPI.
+- `PROXY_INTERNAL_BASE` — its meaning changed (now the backend's full self-link
+  base, partition included, e.g. `.../fhir/clinical-orders`, not `.../fhir`
+  with the partition concatenated separately by the template). k8s's current
+  value (`https://hapi-fhir.dev.umzhc.io.usz.ch/fhir`) is now missing the
+  partition, so self-link/`Location` rewriting silently stops matching.
+
+**Fix:** in `clinical-orders/clinical-orders-proxy.yaml`, add
+`PROXY_UPSTREAM_PATH=/fhir/clinical-orders` and update `PROXY_INTERNAL_BASE` to
+`https://hapi-fhir.dev.umzhc.io.usz.ch/fhir/clinical-orders`.
 
 ## OPA-side JWT signature verification (trust hardening)
 
