@@ -37,16 +37,18 @@ spec:
         - name: proxy
           image: nginxinc/nginx-unprivileged:alpine
           env:
-            # Host values (the k8s equivalents of the compose .env entries).
+            # Backend transport (k8s equivalents of the compose .env entries).
             - name: PROXY_UPSTREAM
               value: hapi-fhir.hapi-fhir.svc.cluster.local:8080
-            - name: PROXY_OUTWARD_URL
-              value: https://clinical-orders.dev.umzhc.io.usz.ch
-            # Base URL HAPI advertises in self-links — MUST equal the base HAPI's
-            # FHIR_SERVER_ADDRESS (hapi-fhir/hapi-fhir.yaml), which is set because
-            # the base is also exposed directly via hapi-fhir-ingress.
-            - name: PROXY_INTERNAL_BASE
-              value: https://hapi-fhir.dev.umzhc.io.usz.ch/fhir
+            # In-cluster HAPI is plaintext; the outward https is handled by the
+            # ingress and carried via X-Forwarded-Proto (which this proxy forwards,
+            # so HAPI renders correct https self-links).
+            - name: PROXY_SCHEME
+              value: http
+            - name: PROXY_BACKEND_HOST
+              value: "$host"            # Host + SNI toward the backend
+            - name: PROXY_BACKEND_PATH
+              value: /fhir/clinical-orders
             # OPTIONAL: full Authorization header injected UPSTREAM to the backend
             # FHIR store (e.g. "Basic <base64(user:pass)>"). Empty = disabled
             # (default); the caller's Authorization then passes through unchanged.

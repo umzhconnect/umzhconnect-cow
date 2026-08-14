@@ -1,29 +1,24 @@
 # Backlog
 
-Tracked improvements that are deliberately deferred (not functional gaps),
-plus known gaps below that block a specific next step.
+Tracked improvements that are deliberately deferred (not functional gaps).
 
-## k8s clinical-orders-proxy.yaml out of sync with the shared proxy template
+## KMS/HSM-backed signing for the key-custodian
 
-**Status:** known gap — will break k8s on next deploy. **Area:**
-`clinical-orders/clinical-orders-proxy.yaml`, `clinical-orders/clinical-orders-proxy.conf.template`.
+**Status:** deferred. **Area:** `key-custodian/app.py`.
 
-The nginx template is shared between docker compose and k8s (mounted into the
-k8s Deployment via ConfigMap). It now expects two env vars that the k8s
-manifest doesn't set/hasn't updated:
+The custodian **loads the L2 private key from a PEM** (`KEY_PATH`) and signs the
+`private_key_jwt` assertion **in-process**. So the raw key exists in plaintext at
+generation time (openssl/`gen-keys.sh` on a laptop/CI) and at rest as a cluster
+Secret — its safety rests on machine hygiene + RBAC.
 
-- `PROXY_UPSTREAM_PATH` — new. Unset in k8s ⇒ envsubst substitutes empty ⇒ the
-  inbound rewrite becomes a no-op passthrough instead of prefixing the
-  `clinical-orders` partition ⇒ requests hit the wrong path on the base HAPI.
-- `PROXY_INTERNAL_BASE` — its meaning changed (now the backend's full self-link
-  base, partition included, e.g. `.../fhir/clinical-orders`, not `.../fhir`
-  with the partition concatenated separately by the template). k8s's current
-  value (`https://hapi-fhir.dev.umzhc.io.usz.ch/fhir`) is now missing the
-  partition, so self-link/`Location` rewriting silently stops matching.
-
-**Fix:** in `clinical-orders/clinical-orders-proxy.yaml`, add
-`PROXY_UPSTREAM_PATH=/fhir/clinical-orders` and update `PROXY_INTERNAL_BASE` to
-`https://hapi-fhir.dev.umzhc.io.usz.ch/fhir/clinical-orders`.
+**Improvement:** delegate signing to a KMS/HSM (AWS KMS / GCP KMS / Azure Key
+Vault / hardware HSM). The key is generated inside the module, is **non-exportable**,
+and the app calls the KMS *Sign* API — so the private key never materialises in the
+pod, git, or a Secret. Adds audit logging, IAM gating, and FIPS-validated hardware
+(relevant for health data). Requires refactoring `app.py` to sign via the KMS SDK
+instead of reading `KEY_PATH`, and dropping the private-key Secret mount (the JWKS
+ConfigMap stays). See `key-custodian/SEALED-SECRETS.md` (#why-kms-beats-openssl).
+Until then, Sealed Secrets is the right GitOps mechanism for the file-based key.
 
 ## OPA-side JWT signature verification (trust hardening)
 

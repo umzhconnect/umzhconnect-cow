@@ -81,3 +81,38 @@ the key material itself.
 The browser-side flow in `web-app/src/pages/CredentialsPage.tsx` is **intentionally
 left untouched** — the in-browser Web Crypto signing is the teaching point on
 that page; replacing it with a server call would hide the most interesting part.
+
+## Kubernetes (namespace `key-custodian`)
+
+Manifests: `ns.yaml`, `key-custodian.yaml` (ConfigMaps + Deployment + Service),
+`kustomization.yaml`. Deploy with `kubectl apply -k key-custodian/` (or via the
+root kustomization / ArgoCD).
+
+The two key files are split by sensitivity:
+- **private key** → the `key-custodian-l2` **Secret** (mounted at `/secret`). It is
+  gitignored; in production deliver it as a **SealedSecret** — see
+  [`SEALED-SECRETS.md`](SEALED-SECRETS.md) for the full GitOps (no-`kubectl`) guide.
+- **public JWKS** → the `key-custodian-jwks` **ConfigMap** in `key-custodian.yaml`
+  (mounted at `/jwks`). It's public, so it lives in git as plain YAML — paste your
+  `keys/l2.jwks.json` in (it must match the private key's `kid`/`n`).
+
+Supply **out of band** (the repo can't hold them):
+
+1. **Image** — key-custodian is built from this folder, not a public image, and
+   ArgoCD does not build. Build & push, then set `image` in `key-custodian.yaml`:
+   ```bash
+   docker build -t <registry>/umzh-key-custodian:<tag> key-custodian/
+   docker push  <registry>/umzh-key-custodian:<tag>
+   ```
+2. **Private key** — generate (`keys/gen-keys.sh l2`) and deliver it. In production,
+   seal it (SealedSecret) per [`SEALED-SECRETS.md`](SEALED-SECRETS.md). For a quick
+   dev cluster you *can* `kubectl -n key-custodian create secret generic
+   key-custodian-l2 --from-file=private.key=keys/l2.key` — but never the real key,
+   and never via `kubectl` where you have no cluster access.
+
+Config (`PARTY`, `CLIENT_ID`, `KID`, `KEYCLOAK_AUDIENCE`) is in the
+`key-custodian-config` ConfigMap. The external gateway reaches the JWK Set via its
+`/jwks.json` route — `JWKS_UPSTREAM` (in `clinical-orders/apisix-external.yaml`)
+points at `key-custodian.key-custodian.svc.cluster.local:8000`. `/sign` is
+unauthenticated (demo): keep the Service ClusterIP-only, never ingress-expose it,
+and restrict access with a NetworkPolicy.

@@ -1,0 +1,11 @@
+namespace: key-custodian
+
+resources:
+  - ns.yaml
+  - key-custodian.yaml
+  # The L2 PRIVATE KEY: generate the SealedSecret per SEALED-SECRETS.md, commit
+  # key-custodian-l2-sealedsecret.yaml, then UNCOMMENT the next line. It is
+  # encrypted (only the in-cluster sealed-secrets controller can decrypt), so it
+  # is safe in git. The PUBLIC JWKS is not here — it's the key-custodian-jwks
+  # ConfigMap in key-custodian.yaml.
+  # - key-custodian-l2-sealedsecret.yaml
