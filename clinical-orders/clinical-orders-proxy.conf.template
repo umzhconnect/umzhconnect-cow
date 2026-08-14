@@ -1,50 +1,41 @@
 # =============================================================================
 # clinical-orders FHIR proxy — outward, partition-less endpoint in front of the
-# base FHIR store (a local partitioned HAPI, or an external server fronted
-# directly). SHARED by docker compose AND Kubernetes: this file is mounted at
-# /etc/nginx/templates/default.conf.template and rendered at container start by
-# the official nginx image's built-in envsubst. Only ${PROXY_*} are substituted
-# (NGINX_ENVSUBST_FILTER=PROXY_); nginx's own $host / $1 survive.
+# partitioned base HAPI. SHARED by docker compose AND Kubernetes: mounted at
+# /etc/nginx/templates/default.conf.template and rendered by the nginx image's
+# envsubst. Only ${PROXY_*} are substituted (NGINX_ENVSUBST_FILTER=PROXY_);
+# nginx's own $host / $1 / $fwd_* survive.
 #
-#   inbound   /fhir/…  → ${PROXY_UPSTREAM_PATH}/…   (on ${PROXY_UPSTREAM})
-#   outbound  ${PROXY_INTERNAL_BASE} is stripped from self-links (sub_filter) and
-#             the Location header (proxy_redirect); Content-Location is dropped —
-#             so the backend's real base URL never appears outward.
+#   inbound   /fhir/…  →  ${PROXY_BACKEND_PATH}/…  on the backend
+#   outbound  the partition segment is stripped from bodies (sub_filter) and the
+#             Location header (proxy_redirect) — the partition never appears outward.
 #
-# Host values (${PROXY_UPSTREAM}, ${PROXY_OUTWARD_URL}, ${PROXY_INTERNAL_BASE},
-# ${PROXY_UPSTREAM_PATH}, ${PROXY_UPSTREAM_SCHEME}) come from the environment
-# (.env for compose; Deployment env for k8s):
-#   PROXY_UPSTREAM       bare host:port nginx proxies to (an nginx `upstream`
-#                        server can't carry a scheme or path).
-#   PROXY_UPSTREAM_SCHEME scheme nginx uses to CONNECT to PROXY_UPSTREAM — http
-#                        (default) for the local base HAPI, https for an
-#                        external server that requires TLS.
-#   PROXY_UPSTREAM_PATH  the request path prefix on that upstream — e.g.
-#                        /fhir/clinical-orders for the local partitioned base
-#                        HAPI, or an external server's own base path (e.g.
-#                        /UMZHCONNECT) when fronting one of those directly.
-#   PROXY_INTERNAL_BASE  the backend's OWN advertised base URL, in full — i.e.
-#                        exactly what a resource's self-link/fullUrl starts
-#                        with (partition included, if any). Sentinel default
-#                        http://localhost:8090/fhir/clinical-orders. MUST match
-#                        whatever the backend actually emits, or the rewrites
-#                        below silently no-op (no match found).
+# URL RENDERING — the backend renders absolute self-links PER REQUEST from the
+# X-Forwarded-Host / X-Forwarded-Proto this proxy forwards (HAPI's
+# ApacheProxyAddressStrategy; server_address left blank). So one store can back
+# MULTIPLE outward hosts, and this proxy no longer rewrites the host — it only
+# strips the partition path, host-agnostically. (If a backend can't derive its base
+# from forwarded headers, give it a fixed base and add a host-rewriting sub_filter.)
 #
-# OPTIONAL backend auth (clinical-orders only): ${PROXY_BACKEND_AUTHORIZATION} is
-# the full Authorization header value to send UPSTREAM to the backend FHIR store
-# (e.g. "Basic <base64(user:pass)>"). Leave it EMPTY (the default) to disable —
-# the caller's own Authorization is then forwarded unchanged and nothing is
-# intercepted. Set it (env / k8s Secret) when the backend requires credentials.
+# BACKEND (env):
+#   ${PROXY_UPSTREAM}       backend host:port
+#   ${PROXY_SCHEME}         http | https (default http; https ⇒ TLS to the backend)
+#   ${PROXY_BACKEND_HOST}   Host header + TLS SNI to present (default nginx $host)
+#   ${PROXY_BACKEND_PATH}   backend path prefix (default /fhir/clinical-orders;
+#                           set to /fhir for a NON-partitioned backend)
+#   ${PROXY_BACKEND_AUTHORIZATION}  optional full Authorization header injected
+#                           upstream (e.g. "Basic <b64>"); empty forwards the
+#                           caller's own Authorization unchanged.
 # =============================================================================
 
-# When PROXY_BACKEND_AUTHORIZATION is empty the interceptor is a no-op: the map
-# falls back to the caller's Authorization header ($http_authorization), so the
-# request is forwarded exactly as it arrives. When set, its value overrides the
-# Authorization sent upstream.
+# Optional backend auth: empty ⇒ forward the caller's Authorization unchanged.
 map $backend_authorization $fhir_authorization {
     ""      $http_authorization;
     default $backend_authorization;
 }
+# Preserve the ORIGINAL forwarded host/proto through a proxy chain (ingress →
+# gateway → here); fall back to what this hop sees (single-hop / compose).
+map $http_x_forwarded_host  $fwd_host  { ""  $http_host; default $http_x_forwarded_host; }
+map $http_x_forwarded_proto $fwd_proto { ""  $scheme; default $http_x_forwarded_proto; }
 
 upstream hapi_base { server ${PROXY_UPSTREAM}; }
 
@@ -57,35 +48,36 @@ server {
     proxy_busy_buffers_size 256k;
 
     location ~ ^/fhir(/.*)?$ {
-        # OPTIONAL backend auth: bake the configured header value into a variable
-        # BEFORE the `rewrite … break` below — that break halts rewrite-module
-        # directives (`set` included), so a `set` placed after it would never run.
-        # The proxy then forwards either this value (when set) or the caller's own
-        # Authorization (when empty) via the map above. Disabled unless
-        # PROXY_BACKEND_AUTHORIZATION is set, so nothing is intercepted by default.
+        # Bake the optional backend-auth value BEFORE `rewrite … break` (the break
+        # halts rewrite-module directives, `set` included).
         set               $backend_authorization "${PROXY_BACKEND_AUTHORIZATION}";
 
-        # /fhir(/...)  ->  ${PROXY_UPSTREAM_PATH}(/...)  on the base.
-        rewrite ^/fhir(/.*)?$ ${PROXY_UPSTREAM_PATH}$1 break;
-        proxy_pass        ${PROXY_UPSTREAM_SCHEME}://hapi_base;
-        # SNI for an https upstream (ignored — harmless — over plain http).
-        proxy_ssl_server_name on;
-        proxy_set_header  Host            $host;
-        proxy_set_header  X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header  Accept-Encoding "";
-        proxy_set_header  Authorization   $fhir_authorization;
+        # /fhir(/...)  ->  ${PROXY_BACKEND_PATH}(/...) on the backend.
+        rewrite ^/fhir(/.*)?$ ${PROXY_BACKEND_PATH}$1 break;
+        proxy_pass        ${PROXY_SCHEME}://hapi_base;
+        proxy_set_header  Host              ${PROXY_BACKEND_HOST};
+        # The backend renders self-links from these — forward the OUTWARD host/proto.
+        proxy_set_header  X-Forwarded-Host  $fwd_host;
+        proxy_set_header  X-Forwarded-Proto $fwd_proto;
+        proxy_set_header  X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header  Accept-Encoding   "";
+        proxy_set_header  Authorization     $fhir_authorization;
 
+        # TLS to an external backend — ignored when ${PROXY_SCHEME} is http. For a
+        # real external server also enable `proxy_ssl_verify on;` + a trusted CA.
+        proxy_ssl_server_name on;
+        proxy_ssl_name        ${PROXY_BACKEND_HOST};
+
+        # Strip the partition from responses (host-agnostic — the backend already
+        # emits the correct outward host). Two rules cover  /partition/…  AND
+        # /partition?query  (paging links), so the partition never leaks.
         sub_filter_once  off;
         sub_filter_types *;
-        # Rewrite the backend's own base URL in self-links to the partition-less
-        # outward base URL. The second rule catches any remaining RELATIVE
-        # occurrence (backend-path-rooted, no host) the same way.
-        sub_filter "${PROXY_INTERNAL_BASE}/" "${PROXY_OUTWARD_URL}/fhir/";
-        sub_filter "${PROXY_UPSTREAM_PATH}/" "/fhir/";
+        sub_filter "${PROXY_BACKEND_PATH}/" "/fhir/";
+        sub_filter "${PROXY_BACKEND_PATH}?" "/fhir?";
 
-        # sub_filter only touches the body — also fix the Location header on
-        # create/update, and drop the duplicate (leaking) Content-Location.
-        proxy_redirect    "${PROXY_INTERNAL_BASE}/" "${PROXY_OUTWARD_URL}/fhir/";
+        # Location header (create/update) — strip the partition on any host.
+        proxy_redirect ~*^(https?://[^/]+)${PROXY_BACKEND_PATH}/(.*)$ $1/fhir/$2;
         proxy_hide_header Content-Location;
     }
 }

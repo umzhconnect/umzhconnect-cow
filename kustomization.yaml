@@ -16,4 +16,5 @@
 resources:
   - hapi-fhir        # base HAPI (namespace hapi-fhir) + managed-db config
   - opa              # policy engine (namespace opa)
+  - key-custodian    # L2 assertion signer + JWKS publisher (namespace key-custodian)
   - clinical-orders  # external gateway, FHIR proxy, partition init (namespace clinical-orders)

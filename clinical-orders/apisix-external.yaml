@@ -29,9 +29,9 @@ data:
   OPA_URL: "http://opa.opa.svc.cluster.local:8181"
   # ↓ The party's key custodian / JWKS host:port. The public /jwks.json route
   #   proxies here so partner IdPs verify our private_key_jwt assertions at this
-  #   gateway's same-origin URL. Not deployed by this folder.
-  #   e.g. key-custodian.clinical-orders.svc.cluster.local:8000
-  JWKS_UPSTREAM: "REPLACE_JWKS_HOST:8000"
+  #   gateway's same-origin URL. Deployed by the key-custodian/ folder (namespace
+  #   key-custodian); repoint only if the custodian runs elsewhere.
+  JWKS_UPSTREAM: "key-custodian.key-custodian.svc.cluster.local:8000"
 # The apisix-external-config ConfigMap (config.yaml + apisix.yaml) is generated
 # by kustomize from apisix/config.yaml + apisix/apisix.yaml (configMapGenerator).
 ---

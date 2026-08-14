@@ -45,8 +45,16 @@ jwt_payload := payload if {
 	[_, payload, _] := io.jwt.decode(tok)
 }
 
-# Party config from per-instance data document (opa-config.json).
-fhir_base := data.config.fhir_base
+# Party config. fhir_base normally comes from the per-instance data document
+# (opa-config.json). It MAY be overridden by the OPA process ENVIRONMENT
+# (opa.runtime().env.FHIR_BASE) so a party can point THIS otherwise-identical
+# policy + config bundle at a DIFFERENT (e.g. cluster-external) FHIR backend
+# WITHOUT editing the committed opa-config.json. The env wins when set & non-empty;
+# otherwise the data document is used. Never sourced from the caller.
+fhir_base := base if {
+	base := object.get(opa.runtime().env, "FHIR_BASE", "")
+	base != ""
+} else := data.config.fhir_base
 
 # OPTIONAL Authorization header OPA attaches to its own FHIR fetches (the
 # http.send calls in main.rego for Consent/Task/ServiceRequest). Sourced from the

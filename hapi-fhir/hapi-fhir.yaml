@@ -34,9 +34,13 @@ spec:
           env:
             - name: SPRING_CONFIG_LOCATION
               value: file:///app/config/application.yaml
-            # Base HAPI is exposed directly via hapi-fhir-ingress
-            - name: FHIR_SERVER_ADDRESS
-              value: https://hapi-fhir.dev.umzhc.io.usz.ch/fhir
+            # No fixed FHIR_SERVER_ADDRESS: HAPI derives the base PER REQUEST from
+            # X-Forwarded-Host/Proto (ApacheProxyAddressStrategy), so BOTH the
+            # direct hapi-fhir-ingress and the clinical-orders proxy get correct,
+            # per-face self-links from one store. https by default when no
+            # X-Forwarded-Proto is present (prod ingress sets it anyway).
+            - name: FHIR_ADDRESS_HTTPS
+              value: "true"
             # The image sets no -Xmx, so Java 17 defaults to MaxRAMPercentage=25%
             # (~256Mi at a 1Gi limit) — too little; rendering large responses (e.g.
             # the CapabilityStatement as HTML) OOMs. Give HAPI most of the limit.

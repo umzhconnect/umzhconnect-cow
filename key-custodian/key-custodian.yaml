@@ -1,0 +1,153 @@
+# =============================================================================
+# key-custodian — holds this party's L2 private key; signs private_key_jwt
+# assertions (/sign) and serves the public JWK Set (/jwks.json). Namespace:
+# key-custodian.
+#
+# Split of the two key files (see SEALED-SECRETS.md for the full GitOps guide):
+#   • private.key → the `key-custodian-l2` SEALED Secret (encrypted, safe in git;
+#     the sealed-secrets controller materialises the real Secret in-cluster).
+#     Mounted read-only at /secret; KEY_PATH points at it.
+#   • jwks.json   → the `key-custodian-jwks` ConfigMap below. The JWK Set is
+#     PUBLIC (it's literally served to the world at /jwks.json), so it lives in
+#     git as plain YAML. Mounted at /jwks; JWKS_PATH points at it.
+#
+# NOT in this manifest (supply out of band — ArgoCD does not build, and the key
+# never goes in git in the clear):
+#   • The IMAGE — build & push from ./key-custodian, then set `image`.
+#   • The private key — sealed into key-custodian-l2-sealedsecret.yaml (see the
+#     guide) and added to kustomization.yaml.
+#
+# The gateway reaches the JWK Set via its /jwks.json route — JWKS_UPSTREAM in
+# apisix-external.yaml points at key-custodian.key-custodian.svc.cluster.local:8000.
+# /sign is UNAUTHENTICATED (demo): keep it ClusterIP-only, never ingress-expose it,
+# restrict access with a NetworkPolicy.
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: key-custodian-config
+data:
+  # This party's short id (label only — shown in /healthz, log lines).
+  PARTY: "REPLACE_PARTY"
+  # The L2 (private_key_jwt) client id registered in the auth server.
+  CLIENT_ID: "REPLACE_CLIENT_ID"
+  # JWT header `kid`; MUST match the only JWK in the jwks.json ConfigMap below
+  # (keys/gen-keys.sh l2 → kid=l2).
+  KID: "l2"
+  # Default assertion audience = the auth server's advertised token endpoint
+  # (same auth server + realm the gateway's AUTH_DISCOVERY_URL points at).
+  KEYCLOAK_AUDIENCE: "https://REPLACE_AUTH_SERVER/realms/umzh-connect/protocol/openid-connect/token"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: key-custodian-jwks
+data:
+  # PUBLIC JWK Set — safe in git. Replace with the contents of your generated
+  # keys/l2.jwks.json (must correspond to the sealed private key: same kid + n).
+  jwks.json: |
+    {
+      "keys": [
+        {
+          "kty": "RSA",
+          "use": "sig",
+          "alg": "RS256",
+          "kid": "l2",
+          "n": "REPLACE_WITH_MODULUS_FROM_keys_l2_jwks_json",
+          "e": "AQAB"
+        }
+      ]
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: key-custodian
+  labels:
+    app: key-custodian
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: key-custodian
+  template:
+    metadata:
+      labels:
+        app: key-custodian
+    spec:
+      # "restricted" PSS. The Flask app writes nothing to disk, reads the key from
+      # a read-only Secret mount, and listens on 8000 — so it runs as a non-root
+      # UID. fsGroup lets that UID read the (group-only) private key file.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: key-custodian
+          # Build & push this yourself (see the header) — ArgoCD does not build.
+          image: REPLACE_REGISTRY/umzh-key-custodian:REPLACE_TAG
+          envFrom:
+            - configMapRef:
+                name: key-custodian-config
+          env:
+            # Point the app at the split mounts (private key = Secret, JWKS = ConfigMap).
+            - name: KEY_PATH
+              value: /secret/private.key
+            - name: JWKS_PATH
+              value: /jwks/jwks.json
+          ports:
+            - containerPort: 8000
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: private-key       # SEALED Secret → the L2 private key
+              mountPath: /secret
+              readOnly: true
+            - name: jwks              # ConfigMap → the public JWK Set
+              mountPath: /jwks
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+      volumes:
+        - name: private-key
+          secret:
+            secretName: key-custodian-l2   # from the SealedSecret (see SEALED-SECRETS.md)
+            defaultMode: 0440              # group-readable (fsGroup 1000), not world
+        - name: jwks
+          configMap:
+            name: key-custodian-jwks
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: key-custodian
+  labels:
+    app: key-custodian
+spec:
+  selector:
+    app: key-custodian
+  ports:
+    - port: 8000
+      targetPort: 8000

@@ -45,23 +45,15 @@ services:
     container_name: party-clinical-orders-fhir
     environment:
       PROXY_UPSTREAM: ${HAPI_BASE_UPSTREAM}
-      # Scheme nginx uses to CONNECT to PROXY_UPSTREAM — http for the local
-      # base HAPI (default); https for an external server that requires TLS.
-      PROXY_UPSTREAM_SCHEME: ${PROXY_UPSTREAM_SCHEME:-http}
-      # Request path prefix on PROXY_UPSTREAM — the local base HAPI's partition
-      # by default; set to an external server's own base path to front that
-      # instead (see clinical-orders-proxy.conf.template).
-      PROXY_UPSTREAM_PATH: ${PROXY_UPSTREAM_PATH:-/fhir/clinical-orders}
-      PROXY_OUTWARD_URL: ${CLINICAL_ORDERS_FHIR_URL}
-      # The backend's own advertised base URL, in full (partition included) —
-      # exactly what its self-links start with. The sentinel default matches
-      # HAPI's default server_address + this partition, when fronted by this
-      # proxy.
-      PROXY_INTERNAL_BASE: ${PROXY_INTERNAL_BASE:-http://localhost:8090/fhir/clinical-orders}
+      # Backend transport (defaults target the bundled in-cluster HAPI). For a
+      # cluster-EXTERNAL backend set PROXY_SCHEME=https, PROXY_BACKEND_HOST=<host>
+      # (Host + TLS SNI), and PROXY_BACKEND_PATH=/fhir if it isn't partitioned.
+      PROXY_SCHEME: ${PROXY_SCHEME:-http}
+      PROXY_BACKEND_HOST: ${PROXY_BACKEND_HOST:-$$host}   # $$host → nginx $host
+      PROXY_BACKEND_PATH: ${PROXY_BACKEND_PATH:-/fhir/clinical-orders}
       # OPTIONAL: full Authorization header sent upstream to the backend FHIR
       # store (e.g. "Basic <base64(user:pass)>"). Empty = disabled (default);
-      # always DEFINED so envsubst renders it (an undefined var would leak the
-      # literal ${...} into the config). clinical-orders only — not the registry.
+      # always DEFINED so envsubst renders it. clinical-orders only.
       PROXY_BACKEND_AUTHORIZATION: ${PROXY_BACKEND_AUTHORIZATION:-}
       NGINX_ENVSUBST_FILTER: "PROXY_"
     volumes:
@@ -77,9 +69,13 @@ services:
     platform: linux/amd64
     container_name: party-opa
     environment:
+      # OPTIONAL: override fhir_base (read via opa.runtime().env in gateway.rego)
+      # to point this same policy/config bundle at a DIFFERENT (e.g. external) FHIR
+      # backend without editing opa-config.json. Empty ⇒ opa-config.json wins.
+      FHIR_BASE: ${OPA_FHIR_BASE:-}
       # OPTIONAL: full Authorization header OPA sends to the FHIR server on its
       # own Consent/Task/ServiceRequest fetches (e.g. "Basic <base64(user:pass)>").
-      # Read via opa.runtime().env in apisix.rego; empty = no header (default).
+      # Read via opa.runtime().env in gateway.rego; empty = no header (default).
       # A secret — not baked into opa-config.json; in k8s inject from a Secret.
       FHIR_BACKEND_AUTHORIZATION: ${FHIR_BACKEND_AUTHORIZATION:-}
     command:
