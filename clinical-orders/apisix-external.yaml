@@ -60,7 +60,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: apisix
-          image: apache/apisix:3.9.0-debian
+          image: apache/apisix:3.17.0-debian
           # Auth / policy URLs → env; apisix.yaml resolves them via ${{...}}.
           envFrom:
             - configMapRef:

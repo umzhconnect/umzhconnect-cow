@@ -28,7 +28,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: init
-          image: curlimages/curl:8.11.1
+          image: curlimages/curl:8.21.0
           command: ["sh", "/init/create-partition.sh"]
           env:
             - name: FHIR_BASE
