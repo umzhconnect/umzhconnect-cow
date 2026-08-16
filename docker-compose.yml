@@ -154,8 +154,6 @@ services:
         condition: service_started
       opa:
         condition: service_started
-      key-custodian:
-        condition: service_started
     networks:
       - party-net
 
