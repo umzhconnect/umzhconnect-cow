@@ -72,20 +72,28 @@ FHIR:
 |---|---|---|
 | `clinical-orders-fhir` | `CLINICAL_ORDERS_FHIR_PORT` (9091) | `clinical-orders` |
 
-It rewrites inbound `/fhir/*` onto `/fhir/clinical-orders/*`, and strips the
-partition back out of response bodies (`sub_filter`) **and** the `Location`
-header (`proxy_redirect`); the duplicate `Content-Location` header is dropped.
-The proxy config is the shared `clinical-orders/clinical-orders-proxy.conf.template`,
-rendered at container start by the nginx image's built-in envsubst from `PROXY_UPSTREAM`
-(base host:port = `HAPI_BASE_UPSTREAM`), `PROXY_OUTWARD_URL` (= `*_FHIR_URL`, the
-outward base the proxy advertises — keep it equal to the reachable host:port), and
-`PROXY_INTERNAL_BASE` (the base URL HAPI stamps into self-links, i.e. its
-`server_address`/`FHIR_SERVER_ADDRESS`). The rewrites key off `PROXY_INTERNAL_BASE`,
-so it **must** equal whatever HAPI advertises: leave the sentinel default
-(`http://localhost:8090/fhir`) when HAPI is fronted only by these proxies, and set
-it to the base's real advertised URL when the base is *also* exposed directly (e.g.
-via `hapi-fhir-ingress`) — otherwise the host is stripped of its partition but not
-rewritten to the outward URL.
+It rewrites inbound `/fhir/*` onto `${PROXY_BACKEND_PATH}/*` (default
+`/fhir/clinical-orders/*`), and strips the partition back out of response bodies
+(`sub_filter`) **and** the `Location` header (`proxy_redirect`); the duplicate
+`Content-Location` header is dropped. The proxy config is the shared
+`clinical-orders/clinical-orders-proxy.conf.template`, rendered at container start by
+the nginx image's built-in envsubst.
+
+The proxy **no longer rewrites the outward host.** HAPI derives its base URL *per
+request* from the `X-Forwarded-Host`/`X-Forwarded-Proto` headers this proxy forwards
+(`ApacheProxyAddressStrategy`; `server_address` left blank), so one store can back
+**multiple** outward base URLs — the proxy only strips the partition path, host-
+agnostically. The env knobs are all backend-transport:
+
+| Env | Default | Meaning |
+|---|---|---|
+| `PROXY_UPSTREAM` | `HAPI_BASE_UPSTREAM` | backend `host:port` |
+| `PROXY_SCHEME` | `http` | `https` ⇒ TLS to the backend |
+| `PROXY_BACKEND_HOST` | nginx `$host` | `Host` header + TLS SNI to present |
+| `PROXY_BACKEND_PATH` | `/fhir/clinical-orders` | backend path prefix; set `/fhir` for a non-partitioned backend |
+
+For a **cluster-external** backend, set `PROXY_SCHEME=https`, `PROXY_BACKEND_HOST` to
+the backend's hostname, and (if it isn't partitioned) `PROXY_BACKEND_PATH=/fhir`.
 
 **Optional backend auth (clinical-orders only).** If the backend FHIR store
 requires credentials (e.g. a commercial server behind the proxy), set
@@ -132,9 +140,9 @@ configMapGenerator:
 ```
 
 The proxy `.conf.template` is the *same* file compose mounts; k8s supplies the
-`PROXY_UPSTREAM`/`PROXY_OUTWARD_URL` values (the k8s equivalents of the `.env`
-entries) as Deployment env. Set `externalName` in `hapi-fhir/managed-db.yaml` to
-your real managed DB host (move the password to a Secret if it has one).
+`PROXY_*` transport values (the k8s equivalents of the `.env` entries) as Deployment
+env. Set `externalName` in `hapi-fhir/managed-db.yaml` to your real managed DB host
+(move the password to a Secret if it has one).
 
 ### Deploy
 

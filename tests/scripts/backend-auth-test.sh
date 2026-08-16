@@ -60,15 +60,14 @@ done
 echo "    echo upstream ready"
 
 # Run the real proxy template twice: once WITH a backend credential, once without.
-# PROXY_INTERNAL_BASE/PROXY_OUTWARD_URL only matter for self-link rewriting, which
-# this test doesn't exercise — the sentinel defaults are fine.
+# This test only exercises backend-auth injection; the transport knobs point the
+# proxy at the echo upstream (plain http, path /fhir so /fhir/ping stays /fhir/ping).
 run_proxy() {  # run_proxy <container> <host-port> <PROXY_BACKEND_AUTHORIZATION>
     docker run -d --rm --name "$1" --network "$NET" -p "$2:8080" \
         -e PROXY_UPSTREAM="echo:8080" \
-        -e PROXY_UPSTREAM_SCHEME="http" \
-        -e PROXY_UPSTREAM_PATH="/fhir" \
-        -e PROXY_OUTWARD_URL="http://localhost:$2" \
-        -e PROXY_INTERNAL_BASE="http://localhost:8090/fhir" \
+        -e PROXY_SCHEME="http" \
+        -e PROXY_BACKEND_HOST="echo" \
+        -e PROXY_BACKEND_PATH="/fhir" \
         -e PROXY_BACKEND_AUTHORIZATION="$3" \
         -e NGINX_ENVSUBST_FILTER="PROXY_" \
         -v "${TEMPLATE}:/etc/nginx/templates/default.conf.template:ro" \

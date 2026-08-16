@@ -36,14 +36,20 @@ hapi:
     # pretty-view. Off by default here because SPRING_CONFIG_LOCATION replaces
     # (not merges) the image's bundled config.
     openapi_enabled: true
-    # Advertised base URL (CapabilityStatement.implementation.url + absolute
-    # self-links / Location headers). From the environment, defaulting to the
-    # sentinel the clinical-orders proxy rewrites. If you override
-    # FHIR_SERVER_ADDRESS (e.g. because the base HAPI is ALSO exposed directly via
-    # hapi-fhir-ingress), you MUST set the proxy's PROXY_INTERNAL_BASE to the same
-    # value — the proxy keys its host-rewrite off it, so a mismatch leaves the
-    # advertised host unrewritten in proxied responses.
-    server_address: ${FHIR_SERVER_ADDRESS:http://localhost:8090/fhir}
+    # Absolute self-link / Location base. LEFT BLANK by default so HAPI derives the
+    # base PER REQUEST from the X-Forwarded-Host / X-Forwarded-Proto headers the
+    # proxy (and ingress) set — ApacheProxyAddressStrategy. This is what lets ONE
+    # store back MULTIPLE outward base URLs: each API/proxy forwards its own host,
+    # and HAPI renders self-links for that host. Store references relatively so
+    # nothing inside a resource is host-specific; the proxy then only strips the
+    # partition path segment, host-agnostically.
+    #   • Set FHIR_SERVER_ADDRESS to force a single fixed base (e.g. a backend that
+    #     can't derive it) — then the proxy must rewrite the host itself.
+    #   • FHIR_ADDRESS_HTTPS=true renders https:// when no X-Forwarded-Proto is seen
+    #     (leave false for local http; prod ingress sets X-Forwarded-Proto anyway).
+    server_address: ${FHIR_SERVER_ADDRESS:}
+    use_apache_address_strategy: true
+    use_apache_address_strategy_https: ${FHIR_ADDRESS_HTTPS:false}
     # URL-based multi-tenancy: /fhir/{partitionName}/{resourceType}. The
     # 'clinical-orders' partition is created after startup by the clinical-orders
     # init job. (The mCSD registry is now its own deployment — see the

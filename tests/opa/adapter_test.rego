@@ -63,6 +63,25 @@ test_allow_true_task_search if {
 		with data.config as {"fhir_base": "http://hapi/fhir/clinical-orders"}
 }
 
+# --- fhir_base resolution: env override vs data document ---------------------
+# Default: no FHIR_BASE env → fhir_base comes from the opa-config.json data doc.
+test_fhir_base_from_data_config if {
+	data.umzh.authz.gateway.fhir_base == "http://cfg/fhir/clinical-orders" with opa.runtime as {"env": {}}
+		with data.config as {"fhir_base": "http://cfg/fhir/clinical-orders"}
+}
+
+# A non-empty FHIR_BASE env overrides the data document (external-backend case).
+test_fhir_base_env_override_wins if {
+	data.umzh.authz.gateway.fhir_base == "https://external/fhir" with opa.runtime as {"env": {"FHIR_BASE": "https://external/fhir"}}
+		with data.config as {"fhir_base": "http://cfg/fhir/clinical-orders"}
+}
+
+# An empty FHIR_BASE env is ignored → falls back to the data document.
+test_fhir_base_empty_env_falls_back if {
+	data.umzh.authz.gateway.fhir_base == "http://cfg/fhir/clinical-orders" with opa.runtime as {"env": {"FHIR_BASE": ""}}
+		with data.config as {"fhir_base": "http://cfg/fhir/clinical-orders"}
+}
+
 # Search with no id → empty resource_id, canonical_path is the raw path.
 test_search_no_id_type if {
 	data.umzh.authz.gateway.resource_type == "Task" with input as search_no_id

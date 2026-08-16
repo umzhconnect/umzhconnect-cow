@@ -83,6 +83,25 @@ document: the `openpolicyagent/opa` image is distroless — no shell/`envsubst` 
 env-based config must be read through `opa.runtime().env`, not rendered into a
 file.)
 
+## Overriding `fhir_base` (point OPA at a different backend)
+
+By default `fhir_base` comes from the committed `opa-config.json` data document (the
+bundled base HAPI's `clinical-orders` partition). A party running this **same**
+policy + config bundle against a **different** FHIR backend — e.g. a cluster-
+external, commercial FHIR server — can override it **without editing** the committed
+config by setting the `FHIR_BASE` **process environment** variable:
+
+- compose: `OPA_FHIR_BASE` in `.env` (mapped to the container's `FHIR_BASE`);
+- k8s: uncomment the `FHIR_BASE` env on the OPA Deployment in `opa.yaml`.
+
+`gateway.rego` resolves it as **env wins when set & non-empty, else the data
+document** (`opa.runtime().env.FHIR_BASE` → `data.config.fhir_base`). This mirrors
+the `FHIR_BACKEND_AUTHORIZATION` mechanism above (same distroless-image reason: env
+config must be read through `opa.runtime().env`, not rendered into a file) and pairs
+naturally with the clinical-orders proxy's `PROXY_*` external-backend knobs. Leave it
+unset for the bundled HAPI. It is **never** taken from the caller — only the process
+environment or the committed data document.
+
 ## Kubernetes
 
 OPA runs in its own **`opa`** namespace, self-contained:

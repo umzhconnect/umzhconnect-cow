@@ -71,6 +71,13 @@ spec:
             - /policies
             - /config/opa-config.json
           env:
+            # OPTIONAL fhir_base override (read via opa.runtime().env in
+            # gateway.rego). Lets a party point THIS otherwise-identical bundle at a
+            # DIFFERENT (e.g. cluster-external) FHIR backend without editing the
+            # committed opa-config ConfigMap. Unset/empty ⇒ opa-config.json wins.
+            # Uncomment and set to the backend's /fhir[/<partition>] base:
+            # - name: FHIR_BASE
+            #   value: https://fhir.partner.example/fhir
             # OPTIONAL Authorization header OPA attaches to its FHIR fetches when
             # the HAPI requires credentials (read via opa.runtime().env in
             # gateway.rego). Kept in a Secret, not the ConfigMap. optional:true ⇒
