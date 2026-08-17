@@ -65,7 +65,7 @@ services:
 
   # ── OPA — consent / fhirContext policy engine ───────────────────────────────
   opa:
-    image: openpolicyagent/opa:0.70.0
+    image: openpolicyagent/opa:1.19.0
     platform: linux/amd64
     container_name: party-opa
     environment:
@@ -134,7 +134,7 @@ services:
   #   :EXTERNAL_GATEWAY_PORT → clinical-orders-fhir:8080 → hapi-fhir (clinical-orders)
   #   /jwks.json             → key-custodian:8000
   apisix-external:
-    image: apache/apisix:3.9.0-debian
+    image: apache/apisix:3.17.0-debian
     container_name: party-apisix-external
     environment:
       AUTH_DISCOVERY_URL: ${AUTH_SERVER_URL}/realms/${AUTH_SERVER_REALM}/.well-known/openid-configuration
@@ -154,15 +154,13 @@ services:
         condition: service_started
       opa:
         condition: service_started
-      key-custodian:
-        condition: service_started
     networks:
       - party-net
 
   # ── One-shot: create this party's clinical-orders partition (owned by that ──
   # service; left empty — records arrive at runtime through the proxy).
   clinical-orders-init:
-    image: curlimages/curl:8.11.1
+    image: curlimages/curl:8.21.0
     container_name: party-clinical-orders-init
     environment:
       FHIR_BASE: http://hapi-fhir:8080/fhir
