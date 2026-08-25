@@ -1,0 +1,39 @@
+meta {
+  name: Get token
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{custodianUrl}}/token
+  body: json
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "client_id": "{{clientId}}",
+    "scope": "{{scope}}"
+  }
+}
+
+script:post-response {
+  if (res.body && res.body.access_token) {
+    bru.setEnvVar("accessToken", res.body.access_token);
+  }
+}
+
+docs {
+  The full L2 flow in one call: the key custodian signs the private_key_jwt
+  assertion AND runs the client_credentials exchange at the auth server, then
+  returns the token response. The access token is saved to `accessToken` and
+  carries this party's SMART scopes and organization_reference claim.
+
+  Body fields are optional: `client_id` overrides the custodian's default
+  (iss+sub+client_id) and `scope` ({{scope}}) requests specific SMART scopes —
+  omit either to fall back to the custodian's configured defaults. You can also
+  pass RFC 9396 `authorization_details`. The AS still decides what it grants.
+}

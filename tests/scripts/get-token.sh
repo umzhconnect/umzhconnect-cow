@@ -7,10 +7,11 @@
 #       POST the mock issuer's /token with the EXACT claims the scenario needs.
 #
 #   TOKEN_SOURCE=real
-#       Run the L2 private_key_jwt flow: custodian /sign → exchange at the auth
-#       server. scope + organization_reference come from the REGISTERED CLIENT
-#       (not from here); CONTEXT_REF is sent as RFC 9396 authorization_details so
-#       the issued token carries it as fhirContext.
+#       Run the L2 private_key_jwt flow via the custodian: POST /token, which
+#       signs the assertion AND performs the exchange at the auth server, then
+#       returns the access token. scope + organization_reference come from the
+#       REGISTERED CLIENT (not from here); CONTEXT_REF is passed to /token as RFC
+#       9396 authorization_details so the issued token carries it as fhirContext.
 #
 # Claims via env:
 #   SCOPE        e.g. "system/Task.c system/Task.u"   (mock only; real uses client defaults)
@@ -35,26 +36,17 @@ if [ "$TOKEN_SOURCE" = "mock" ]; then
     exit 0
 fi
 
-# --- real auth server (L2 private_key_jwt) ---
+# --- real auth server (L2 private_key_jwt), brokered by the custodian ---
+# The custodian owns the assertion signing AND the exchange: we just ask it for a
+# token. CONTEXT_REF (if any) rides along as RFC 9396 authorization_details.
 CUSTODIAN_URL="${CUSTODIAN_URL:-http://localhost:9087}"
-KC_URL="${KC_URL:-http://localhost:8180}"
-KC_REALM="${KC_REALM:-umzh-connect}"
-CLIENT_ID="${CLIENT_ID:-fulfiller-client-l2}"
-TOKEN_URL="${KC_URL}/realms/${KC_REALM}/protocol/openid-connect/token"
-ASSERTION_TYPE="urn%3Aietf%3Aparams%3Aoauth%3Aclient-assertion-type%3Ajwt-bearer"
 
-sign_resp=$(curl -sf -X POST -H "Content-Type: application/json" \
-    -d "{\"audience\":\"${TOKEN_URL}\"}" "${CUSTODIAN_URL}/sign")
-assertion=$(printf '%s' "$sign_resp" | sed -n 's/.*"assertion"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
-[ -z "$assertion" ] && { echo "get-token: custodian /sign at ${CUSTODIAN_URL} failed" >&2; exit 1; }
-
-body="grant_type=client_credentials&client_id=${CLIENT_ID}"
-body="${body}&client_assertion_type=${ASSERTION_TYPE}&client_assertion=${assertion}"
 if [ -n "$CONTEXT_REF" ]; then
-    ad="[{\"type\":\"umzh-connect-context\",\"identifier\":\"${CONTEXT_REF}\"}]"
-    ad_enc=$(printf '%s' "$ad" | sed 's/%/%25/g;s/ /%20/g;s/"/%22/g;s/{/%7B/g;s/}/%7D/g;s/\[/%5B/g;s/\]/%5D/g;s/:/%3A/g;s/,/%2C/g;s|/|%2F|g')
-    body="${body}&authorization_details=${ad_enc}"
+    body="{\"authorization_details\":[{\"type\":\"umzh-connect-context\",\"identifier\":\"${CONTEXT_REF}\"}]}"
+else
+    body="{}"
 fi
 
-curl -sf -H "Content-Type: application/x-www-form-urlencoded" -d "$body" \
-    "$TOKEN_URL" | extract_access_token
+resp=$(curl -sf -X POST -H "Content-Type: application/json" -d "$body" "${CUSTODIAN_URL}/token") \
+    || { echo "get-token: custodian /token at ${CUSTODIAN_URL} failed" >&2; exit 1; }
+printf '%s' "$resp" | extract_access_token

@@ -20,6 +20,37 @@ instead of reading `KEY_PATH`, and dropping the private-key Secret mount (the JW
 ConfigMap stays). See `key-custodian/SEALED-SECRETS.md` (#why-kms-beats-openssl).
 Until then, Sealed Secrets is the right GitOps mechanism for the file-based key.
 
+## Token caching in the key-custodian /token broker
+
+**Status:** deferred. **Area:** `key-custodian/app.py`.
+
+`/token` performs a **fresh** `client_credentials` exchange at the auth server on
+**every** call. Under load (e.g. a workflow engine firing many runs) that is N
+exchanges for N requests, all effectively identical for a given scope.
+
+**Improvement:** cache the AS access token keyed by `(scope, ...)` and reuse it
+until it is within a small skew of `expires_in`, so repeat calls are served from
+memory. Mint fresh (bypass the cache) whenever the request carries
+`authorization_details` (RFC 9396) — that token is request-specific and must not
+be shared. Add a `TOKEN_CACHE_SKEW` env for the refresh margin. Keep the response
+`Cache-Control: no-store` regardless (the cache is internal to the broker).
+
+## Per-caller authentication on the key-custodian /token endpoint
+
+**Status:** deferred. **Area:** `key-custodian/app.py`, `key-custodian/key-custodian.yaml`.
+
+`/token` is **unauthenticated** (demo posture, same as the removed `/sign`): any
+workload that can reach the Service can obtain an access token for this party's
+client. It is mitigated today only by network scope — ClusterIP-only Service, no
+ingress, and a NetworkPolicy is expected to fence it.
+
+**Improvement:** gate `/token` with **workload identity** — the caller presents
+its Kubernetes ServiceAccount token (audience-bound projected token) or a SPIFFE
+SVID; the custodian verifies it (e.g. `TokenReview` / OIDC validation) and maps
+the caller to an allowed `client_id`/scope policy, so a compromised workload
+cannot widen its own access. mTLS between caller and custodian is an alternative.
+Pair with a NetworkPolicy restricting who can even open the connection.
+
 ## OPA-side JWT signature verification (trust hardening)
 
 **Status:** deferred. **Area:** `opa/policies/gateway.rego`.

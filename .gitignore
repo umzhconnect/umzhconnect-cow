@@ -23,5 +23,9 @@ opa-debug-js
 keys/*.key
 keys/*.jwks.json
 
+# ── Python bytecode (key-custodian) ─────────────────────────────────────────
+__pycache__/
+*.pyc
+
 # ── tests ───────────────────────────────────────────────────────────────────
 tests/reports/*.xml

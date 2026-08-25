@@ -90,7 +90,7 @@ mints each scenario's token and passes it to Hurl, so the Hurl files never chang
   TOKEN_SOURCE=real CLIENT_ID=<l2-client> \
     CALLER_ORG=<client-org> OUR_ORG=<client-org> tests/scripts/run-tests.sh
   ```
-  Tokens come from the real L2 flow (custodian `/sign` → exchange), with
+  Tokens come from the real L2 flow (custodian `/token` signs + exchanges), with
   `fhirContext` supplied as RFC 9396 `authorization_details`. Note `scope` and
   `organization_reference` are then fixed by the **registered client**, so
   `CALLER_ORG` must equal that client's org (and the seeded Consent actor). Purely

@@ -1,7 +1,8 @@
 # =============================================================================
-# key-custodian — holds this party's L2 private key; signs private_key_jwt
-# assertions (/sign) and serves the public JWK Set (/jwks.json). Namespace:
-# key-custodian.
+# key-custodian — holds this party's L2 private key. It runs the private_key_jwt
+# client_credentials flow at the auth server and returns the access token
+# (/token) and serves the public JWK Set (/jwks.json). The private key and the
+# signed assertion never leave this pod. Namespace: key-custodian.
 #
 # Split of the two key files (see SEALED-SECRETS.md for the full GitOps guide):
 #   • private.key → the `key-custodian-l2` SEALED Secret (encrypted, safe in git;
@@ -19,24 +20,27 @@
 #
 # The gateway reaches the JWK Set via its /jwks.json route — JWKS_UPSTREAM in
 # apisix-external.yaml points at key-custodian.key-custodian.svc.cluster.local:8000.
-# /sign is UNAUTHENTICATED (demo): keep it ClusterIP-only, never ingress-expose it,
-# restrict access with a NetworkPolicy.
+# /token is UNAUTHENTICATED (demo): keep it ClusterIP-only, never ingress-expose it,
+# restrict access with a NetworkPolicy. Production would gate it with a
+# workload-identity token (k8s ServiceAccount / SPIFFE) or mTLS.
 # =============================================================================
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: key-custodian-config
 data:
-  # This party's short id (label only — shown in /healthz, log lines).
-  PARTY: "REPLACE_PARTY"
   # The L2 (private_key_jwt) client id registered in the auth server.
   CLIENT_ID: "REPLACE_CLIENT_ID"
-  # JWT header `kid`; MUST match the only JWK in the jwks.json ConfigMap below
-  # (keys/gen-keys.sh l2 → kid=l2).
-  KID: "l2"
-  # Default assertion audience = the auth server's advertised token endpoint
-  # (same auth server + realm the gateway's AUTH_DISCOVERY_URL points at).
-  KEYCLOAK_AUDIENCE: "https://REPLACE_AUTH_SERVER/realms/umzh-connect/protocol/openid-connect/token"
+  # JWT header `kid`; MUST match the `kid` of the JWK in the key-custodian-jwks
+  # ConfigMap below (and the kid of your generated key, e.g. gen-keys.sh l2 → l2).
+  KID: "REPLACE_KID"
+  # The auth server's advertised token endpoint (same auth server + realm the
+  # gateway's AUTH_DISCOVERY_URL points at). Used both as the assertion `aud` and
+  # as the URL the custodian POSTs the client_credentials exchange to.
+  TOKEN_ENDPOINT: "https://REPLACE_AUTH_SERVER/realms/umzh-connect/protocol/openid-connect/token"
+  # Scope requested when a /token call doesn't specify one. Leave empty to let
+  # the AS apply the client's registered default scopes.
+  DEFAULT_SCOPE: ""
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -52,7 +56,7 @@ data:
           "kty": "RSA",
           "use": "sig",
           "alg": "RS256",
-          "kid": "l2",
+          "kid": "REPLACE_KID",
           "n": "REPLACE_WITH_MODULUS_FROM_keys_l2_jwks_json",
           "e": "AQAB"
         }
