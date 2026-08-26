@@ -12,10 +12,20 @@
 # See key-custodian/README.md.
 FROM python:3.12-slim
 
+# Patch the OS packages the base image ships with — clears Trivy's fixable
+# Debian HIGH/CRITICAL — then drop the apt lists to keep the image small. Behind
+# a corporate proxy, apt reads the same http_proxy/https_proxy env pip uses;
+# Docker/BuildKit forwards those when set in the client or passed as build args.
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+
+# BUILD_INSECURE=1 relaxes pip's TLS host checks for a proxy presenting an
+# untrusted cert (dev only). Pins chosen to clear Trivy's fixable Python HIGHs:
+#   pyjwt 2.13.0        — CVE-2026-48526 (auth bypass), CVE-2026-32597 (crit hdr)
+#   cryptography 49.0.0 — CVE-2026-26007, CVE-2026-69249, bundled-OpenSSL GHSA
 ARG BUILD_INSECURE=
 RUN pip install --no-cache-dir \
     ${BUILD_INSECURE:+--trusted-host pypi.org --trusted-host files.pythonhosted.org} \
-    flask==3.0.3 pyjwt==2.9.0 cryptography==43.0.1 requests==2.32.3
+    flask==3.0.3 pyjwt==2.13.0 cryptography==49.0.0 requests==2.32.3
 
 WORKDIR /app
 COPY app.py /app/app.py
