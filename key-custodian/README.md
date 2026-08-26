@@ -57,7 +57,8 @@ the key material itself.
 | `KID`               | required               | JWT header `kid` (must match the only JWK in `JWKS_PATH`) |
 | `KEY_PATH`          | `/keys/private.key`    | RSA private key (PEM) |
 | `JWKS_PATH`         | `/keys/jwks.json`      | JWK Set file served verbatim |
-| `TOKEN_ENDPOINT`    | required               | Assertion `aud` **and** the token endpoint the exchange POSTs to |
+| `TOKEN_ENDPOINT`    | required               | The token endpoint the exchange POSTs to (and the default `aud`) |
+| `AUDIENCE`          | `TOKEN_ENDPOINT`       | Assertion `aud` claim; override only if the AS expects a non-token-endpoint audience |
 | `DEFAULT_SCOPE`     | `""`                   | Scope requested when a `/token` call omits one |
 | `ASSERTION_TTL`     | `60`                   | Assertion lifetime in seconds (1..300) |
 | `HTTP_TIMEOUT`      | `10`                   | AS request timeout in seconds |

@@ -33,17 +33,18 @@ POST /token response (the AS token response, passed through verbatim):
       ...
     }
 
-The assertion `aud` and the token-endpoint POST target are the same URL
-(TOKEN_ENDPOINT) — per RFC 7523 the private_key_jwt audience is the OAuth token
-endpoint. Token caching and per-caller auth on /token are deferred (see
-BACKLOG.md).
+The assertion `aud` defaults to the token-endpoint URL (TOKEN_ENDPOINT) — per
+RFC 7523 the private_key_jwt audience is normally the OAuth token endpoint — but
+can be overridden with AUDIENCE when the auth server expects a different value.
+Token caching and per-caller auth on /token are deferred (see BACKLOG.md).
 
 Env contract:
     CLIENT_ID          required   default iss+sub+client_id (per-request overridable)
     KID                required   kid header (must match the JWK in JWKS_PATH)
     KEY_PATH           default /keys/private.key
     JWKS_PATH          default /keys/jwks.json
-    TOKEN_ENDPOINT  required   assertion `aud` AND the token endpoint POSTed to
+    TOKEN_ENDPOINT     required   the token endpoint the exchange is POSTed to
+    AUDIENCE           default TOKEN_ENDPOINT       assertion `aud` claim
     DEFAULT_SCOPE      default ""                  scope requested when none given
     ASSERTION_TTL      default 60                  assertion lifetime (s), 1..300
     HTTP_TIMEOUT       default 10                  AS request timeout (s)
@@ -65,9 +66,12 @@ CLIENT_ID          = os.environ["CLIENT_ID"]
 KID                = os.environ["KID"]
 KEY_PATH           = os.environ.get("KEY_PATH",  "/keys/private.key")
 JWKS_PATH          = os.environ.get("JWKS_PATH", "/keys/jwks.json")
-# The assertion audience doubles as the exchange target: per RFC 7523 the
-# private_key_jwt `aud` is the token endpoint, so we sign for it and POST to it.
-TOKEN_ENDPOINT  = os.environ["TOKEN_ENDPOINT"]
+# Where the client_credentials exchange is POSTed.
+TOKEN_ENDPOINT     = os.environ["TOKEN_ENDPOINT"]
+# The assertion `aud`. Per RFC 7523 the private_key_jwt audience is normally the
+# token endpoint, so it defaults to TOKEN_ENDPOINT — set AUDIENCE only when the
+# auth server expects a different value (e.g. the issuer URL).
+AUDIENCE           = os.environ.get("AUDIENCE", TOKEN_ENDPOINT)
 DEFAULT_SCOPE      = os.environ.get("DEFAULT_SCOPE", "")
 ASSERTION_TTL      = int(os.environ.get("ASSERTION_TTL", "60"))
 HTTP_TIMEOUT       = int(os.environ.get("HTTP_TIMEOUT", "10"))
@@ -112,7 +116,7 @@ def _mint_assertion(client_id):
         {
             "iss": client_id,
             "sub": client_id,
-            "aud": TOKEN_ENDPOINT,
+            "aud": AUDIENCE,
             "iat": now,
             "exp": now + ASSERTION_TTL,
             "jti": str(uuid.uuid4()),

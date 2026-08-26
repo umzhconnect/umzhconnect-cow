@@ -35,9 +35,12 @@ data:
   # ConfigMap below (and the kid of your generated key, e.g. gen-keys.sh l2 → l2).
   KID: "REPLACE_KID"
   # The auth server's advertised token endpoint (same auth server + realm the
-  # gateway's AUTH_DISCOVERY_URL points at). Used both as the assertion `aud` and
-  # as the URL the custodian POSTs the client_credentials exchange to.
+  # gateway's AUTH_DISCOVERY_URL points at). The URL the custodian POSTs the
+  # client_credentials exchange to, and the default assertion `aud`.
   TOKEN_ENDPOINT: "https://REPLACE_AUTH_SERVER/realms/umzh-connect/protocol/openid-connect/token"
+  # Optional: the assertion `aud` claim. Defaults to TOKEN_ENDPOINT (per RFC 7523);
+  # set this only if the auth server expects a different audience (e.g. the issuer URL).
+  # AUDIENCE: "https://REPLACE_AUTH_SERVER/realms/umzh-connect"
   # Scope requested when a /token call doesn't specify one. Leave empty to let
   # the AS apply the client's registered default scopes.
   DEFAULT_SCOPE: ""
