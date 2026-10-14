@@ -1,0 +1,43 @@
+# =============================================================================
+# Ingress for matchbox (ArgoCD deployment). Exposes the matchbox FHIR endpoint
+# (/matchboxv3/fhir) and the web GUI (/matchboxv3/) via the nginx ingress
+# controller, with a cert-manager-issued TLS cert — mirroring hapi-fhir/ingress.yaml.
+#
+# ⚠️ SECURITY: matchbox's $transform / $validate and the GUI are UNAUTHENTICATED.
+# Exposing them on a public host lets anyone run transforms/validations against
+# this instance. Only ingress-expose in a trusted/dev network, or put auth in
+# front (ingress basic-auth / oauth2-proxy / IP allowlist). For a purely internal
+# transform service, drop this file from kustomization.yaml and keep it ClusterIP.
+# =============================================================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: matchbox-ingress
+  labels:
+    name: matchbox-ingress
+  annotations:
+    cert-manager.io/cluster-issuer: clusterissuer-acme-nginx
+    # The first $validate builds the validation engine and a map PUT reloads it —
+    # both can take minutes, well past nginx's 60s default (→ 504).
+    nginx.ingress.kubernetes.io/proxy-read-timeout: '600'
+    nginx.ingress.kubernetes.io/proxy-send-timeout: '600'
+    # Bundles to transform/validate can exceed nginx's 1m default body limit.
+    nginx.ingress.kubernetes.io/proxy-body-size: 10m
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: matchbox.dev.umzhc.io.usz.ch
+      http:
+        paths:
+          # Whole matchbox app: FHIR API at /matchboxv3/fhir/..., GUI at /matchboxv3/.
+          - pathType: Prefix
+            path: '/'
+            backend:
+              service:
+                name: matchbox
+                port:
+                  number: 8080
+  tls:
+    - hosts:
+        - matchbox.dev.umzhc.io.usz.ch
+      secretName: matchbox.dev.umzhc.io.usz.ch-cert

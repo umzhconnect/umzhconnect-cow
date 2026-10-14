@@ -1,0 +1,58 @@
+# =============================================================================
+# matchbox-load-maps — one-shot Job that loads the FHIR Mapping Language maps
+# (maps/*.fml, generated into the `matchbox-maps` ConfigMap) into matchbox via an
+# idempotent PUT StructureMap/<name> (see load-maps.sh). It waits until matchbox
+# has finished its first-boot IG install (ch-etoc-document searchable) before
+# loading — first boot can take 10+ minutes.
+#
+# Re-running: ArgoCD runs it after every sync (PostSync hook, old Job deleted
+# first), so a changed .fml is picked up on the next sync. With plain kubectl,
+# re-run it after changing a map:
+#   kubectl -n matchbox delete job matchbox-load-maps && kubectl apply -k matchbox/
+# =============================================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: matchbox-load-maps
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: matchbox-load-maps
+    spec:
+      restartPolicy: OnFailure
+      # "restricted" PSS; curlimages/curl ships curl + busybox sh and runs as non-root.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 100
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: load-maps
+          image: curlimages/curl:8.21.0
+          command: ["sh", "/maps/load-maps.sh"]
+          env:
+            - name: MATCHBOX_URL
+              value: http://matchbox:8080/matchboxv3/fhir
+            - name: MAPS_DIR
+              value: /maps
+            # Root profile of the IG in ig-validation.yaml — searchable once the
+            # first-boot IG install has finished.
+            - name: WAIT_FOR_PROFILE
+              value: http://fhir.ch/ig/ch-etoc/StructureDefinition/ch-etoc-document
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: maps
+              mountPath: /maps
+      volumes:
+        - name: maps
+          configMap:
+            name: matchbox-maps

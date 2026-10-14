@@ -1,0 +1,24 @@
+namespace: matchbox
+
+resources:
+  - ns.yaml
+  - matchbox.yaml
+  - load-maps.yaml
+  - ingress.yaml
+
+# Matchbox's application.yaml is generated from the SHARED file colocated here
+# (the same file docker compose bind-mounts), mirroring hapi-fhir/. ig-validation.yaml
+# (CH eToC IG load) is k8s-only and layered on top by the Deployment command.
+configMapGenerator:
+  - name: matchbox-config
+    files:
+      - application.yaml
+      - ig-validation.yaml
+  # FHIR Mapping Language maps + the loader script for the matchbox-load-maps Job.
+  - name: matchbox-maps
+    files:
+      - load-maps.sh
+      - maps/ServiceRequestBundleToChEtoc.fml
+
+generatorOptions:
+  disableNameSuffixHash: true
