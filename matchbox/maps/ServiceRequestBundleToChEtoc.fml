@@ -1,0 +1,185 @@
+// =============================================================================
+// Placer ServiceRequest search Bundle  ->  CH eToC document Bundle
+//
+// Input : the searchset Bundle from the workflow's getServiceRequest step
+//         (ServiceRequest + _include'd Patient/PractitionerRole/Condition/
+//         MedicationStatement/Coverage/DocumentReference, plus the requester's
+//         Practitioner via _include:iterate=PractitionerRole:practitioner),
+//         each entry fullUrl'd.
+// Output: a CH eToC document Bundle (ch-etoc-document) whose first entry is a
+//         Composition (ch-etoc-composition) that files the clinical resources
+//         into the real eToC sections, followed by every source resource.
+//
+// APPROACH — lossless by construction: the source resources already carry their
+// CH profiles (ch-core Patient, ch-etoc diagnosis Conditions, …), so they are
+// COPIED wholesale into the document (see CopyEntry) rather than rebuilt field
+// by field. Verified against examples/input-servicerequest.bundle.json:
+// 9/9 resources and 154/154 leaf values retained (100%); all in-bundle
+// references resolve.
+//
+// STATUS: eToC-profiled; addresses the structural/conformance errors seen on
+// import into a real eToC target (see matchbox/sample/eToC_PetraMeier_error.json):
+//   - Bundle.identifier: system fixed to urn:ietf:rfc:3986 by the profile, value =
+//     the ServiceRequest's absolute URL (unique, stable per referral). Composition
+//     gets a RESTful fullUrl on the copied entries' base, so its RELATIVE references
+//     (Patient/…, Condition/…) resolve like the copied resources' own relative refs
+//     — no absolute URLs minted. Base is derived from the ServiceRequest fullUrl.
+//   - orderReferral section carries min 3 entries: the ServiceRequest plus the
+//     Questionnaire + QuestionnaireResponse stubs (referenced by their urn:uuids).
+//   - Composition.text narrative, fixed category (SNOMED 721927009), author
+//     (requester PractitionerRole), fixed title 'Zuweisungsschreiben'.
+//   - orderReferral section (LOINC 93037-0) files the ServiceRequest; hardcoded
+//     ch-orf Questionnaire + QuestionnaireResponse stubs satisfy the document's
+//     ch-orf slices (these are conformance stubs, NOT real referral-form data —
+//     replace once the workflow supplies a real Questionnaire/QR).
+// Source data (resources are copied wholesale, so conformance of the copied
+// resources is the PLACER's responsibility — fixed in the placer seed bundle):
+//   - Condition.category uses the ch-etoc codes (primary-/secondary-diagnosis).
+//   - Coverage conforms to ch-orf-coverage (identifier.type VeKa, type from the
+//     mainguarantor ValueSet) — otherwise ServiceRequest.insurance fails and the
+//     ServiceRequest/Composition slices cascade to errors.
+//   - The requester's Practitioner arrives via
+//     _include:iterate=PractitionerRole:practitioner (allowed at the placer
+//     gateway), so PractitionerRole.practitioner resolves in the document.
+// Verified: matchbox/sample/ServiceRequestPetraMeier.json transforms to a
+// document that validates against ch-etoc-document with 0 errors.
+// Remaining (out of this map's scope):
+//   - Coverage has no eToC section (kept in the bundle, referenced by
+//     ServiceRequest.insurance).
+//   - Organization references point at the registry (absolute URLs, not in the
+//     bundle) — reported by the validator as information only.
+//   - Consider re-profiling the ServiceRequest to ch-etoc-servicerequest if the
+//     target requires it (source is ch-umzh-connect-servicerequest, derived from
+//     it).
+// NOTE: $validate needs the IG loaded in matchbox (currently transform-only).
+// =============================================================================
+
+map "http://umzhconnect.ch/fhir/StructureMap/ServiceRequestBundleToChEtoc" = "ServiceRequestBundleToChEtoc"
+
+uses "http://hl7.org/fhir/StructureDefinition/Bundle" alias BundleSrc as source
+uses "http://hl7.org/fhir/StructureDefinition/Bundle" alias BundleTgt as target
+
+group Referral(source src : BundleSrc, target bundle : BundleTgt) {
+  src -> bundle.meta as m, m.profile = 'http://fhir.ch/ig/ch-etoc/StructureDefinition/ch-etoc-document' "docprofile";
+  // Document identifier: system fixed to urn:ietf:rfc:3986 by the profile, so the
+  // value is a URI — the ServiceRequest's absolute URL (unique, stable per referral).
+  src -> evaluate(src, entry.where(resource is ServiceRequest).fullUrl) as srUrl,
+         bundle.identifier as bi, bi.system = 'urn:ietf:rfc:3986', bi.value = srUrl "identifier";
+  src -> bundle.type = 'document' "type";
+  src -> bundle.timestamp = evaluate(src, now()) "ts";
+  // Composition first: RESTful fullUrl on the SAME base as the copied entries, so
+  // its RELATIVE references (Patient/…, Condition/…) resolve — no absolute URLs.
+  src -> uuid() as cid,
+         evaluate(src, entry.where(resource is ServiceRequest).fullUrl) as srUrl2,
+         evaluate(srUrl2, substring(0, indexOf('/ServiceRequest/'))) as base2,
+         append(base2, '/Composition/') as cpath,
+         append(cpath, cid) as compUrl,
+         bundle.entry as ce, ce.fullUrl = compUrl, ce.resource = create('Composition') as comp, comp.id = cid then BuildComposition(src, comp) "composition";
+  // Copy every source resource into the document, unchanged (lossless)
+  src.entry as se -> bundle.entry as te then CopyEntry(se, te) "copyEntries";
+  // Hardcoded ch-orf stubs so the ch-etoc-document Questionnaire /
+  // QuestionnaireResponse slices are satisfied (not present in the source).
+  src -> bundle.entry as qe, qe.fullUrl = 'urn:uuid:85ab9397-9078-4756-af22-cea8d8eb82fc', qe.resource = create('Questionnaire') as q then BuildQuestionnaire(src, q) "questionnaire";
+  src -> bundle.entry as qre, qre.fullUrl = 'urn:uuid:07f73afc-03d9-42b0-bf09-8a03eab23dd9', qre.resource = create('QuestionnaireResponse') as qr then BuildQuestionnaireResponse(src, qr) "qresponse";
+}
+
+group CopyEntry(source se, target te) {
+  se.fullUrl as u -> te.fullUrl = u "fu";
+  se.resource as r -> te.resource = r "res";
+}
+
+// ── Hardcoded ch-orf conformance stubs ───────────────────────────────────────
+group BuildQuestionnaire(source src : BundleSrc, target q) {
+  src -> q.id = 'QuestionnaireEtoc' "id";
+  src -> q.meta as m, m.profile = 'http://fhir.ch/ig/ch-orf/StructureDefinition/ch-orf-questionnaire' "profile";
+  src -> q.url = 'http://fhir.ch/ig/ch-orf/Questionnaire/order-referral-form' "url";
+  src -> q.status = 'active' "status";
+  src -> q.purpose = 'Generated for conformance reasons.' "purpose";
+}
+group BuildQuestionnaireResponse(source src : BundleSrc, target qr) {
+  src -> qr.id = 'QuestionnaireResponseKisimEtoc' "id";
+  src -> qr.meta as m, m.profile = 'http://fhir.ch/ig/ch-orf/StructureDefinition/ch-orf-questionnaireresponse' "profile";
+  src -> qr.text as t, t.status = 'additional', t.div = '<div xmlns="http://www.w3.org/1999/xhtml"><div>Generated for conformance reasons</div></div>' "text";
+  src -> qr.status = 'completed' "status";
+}
+
+group BuildComposition(source src : BundleSrc, target comp) {
+  src -> comp.meta as m, m.profile = 'http://fhir.ch/ig/ch-etoc/StructureDefinition/ch-etoc-composition' "compprofile";
+  // comp.id is set by the caller (matches the RESTful fullUrl)
+  // Narrative required by ch-etoc-composition (Composition.text min 1)
+  src -> comp.text as t, t.status = 'generated', t.div = '<div xmlns="http://www.w3.org/1999/xhtml">Zuweisungsschreiben</div>' "text";
+  src -> comp.status = 'final' "status";
+  src -> comp.type = cc('http://snomed.info/sct', '371535009') "type";
+  // Category fixed by the profile (min 1)
+  src -> comp.category = cc('http://snomed.info/sct', '721927009', 'Referral note (record artifact)') "category";
+  src -> comp.date = evaluate(src, now()) "date";
+  // Title fixed to 'Zuweisungsschreiben' by the profile
+  src -> comp.title = 'Zuweisungsschreiben' "title";
+  src.entry as e -> comp then SetSubject(e, comp) "subject";
+  // Author required (min 1) — the referral requester PractitionerRole
+  src.entry as e -> comp then SetAuthor(e, comp) "author";
+  // orderReferral section (LOINC 93037-0) — required slice, files the ServiceRequest
+  src -> comp.section as sec then OrderReferralSection(src, sec) "secOrder";
+  src -> comp.section as sec then ProblemsSection(src, sec) "secProblems";
+  src -> comp.section as sec then MedsSection(src, sec) "secMeds";
+  src -> comp.section as sec then AttachSection(src, sec) "secAttach";
+}
+
+// Reference copied resources RELATIVELY (Type/id), matching the source style; they
+// resolve against the Composition's RESTful fullUrl base (same base as the entries).
+group SetSubject(source e, target comp) {
+  e.resource : Patient as p -> comp.subject as s then PatRef(p, s) "ref";
+}
+group PatRef(source p : Patient, target s) { p.id as id -> s.reference = append('Patient/', id) "r"; }
+group SetAuthor(source e, target comp) {
+  e.resource : PractitionerRole as pr -> comp.author as a then PractRoleRef(pr, a) "ref";
+}
+group PractRoleRef(source pr : PractitionerRole, target a) { pr.id as id -> a.reference = append('PractitionerRole/', id) "r"; }
+
+// ── Order/Referral section (LOINC 93037-0) ← ServiceRequest ──────────────────
+group OrderReferralSection(source src : BundleSrc, target sec) {
+  src -> sec.title = 'Order / Referral' "t";
+  src -> sec.code = cc('http://loinc.org', '93037-0') "c";
+  src.entry as e -> sec then AddServiceRequest(e, sec) "e";
+  // orderReferral requires min 3 entries incl. the Questionnaire + QuestionnaireResponse
+  // slices — reference the hardcoded ch-orf stubs by their (urn:uuid) fullUrls.
+  src -> sec.entry as ref, ref.reference = 'urn:uuid:85ab9397-9078-4756-af22-cea8d8eb82fc' "qref";
+  src -> sec.entry as ref, ref.reference = 'urn:uuid:07f73afc-03d9-42b0-bf09-8a03eab23dd9' "qrref";
+}
+group AddServiceRequest(source e, target sec) {
+  e.resource : ServiceRequest as s -> sec.entry as ref then SrRef(s, ref) "ref";
+}
+group SrRef(source s : ServiceRequest, target ref) { s.id as id -> ref.reference = append('ServiceRequest/', id) "r"; }
+
+// ── Problems section (LOINC 57852-6) ← Condition (primary + secondary dx) ────
+group ProblemsSection(source src : BundleSrc, target sec) {
+  src -> sec.title = 'Problems' "t";
+  src -> sec.code = cc('http://loinc.org', '57852-6') "c";
+  src.entry as e -> sec then AddCondition(e, sec) "e";
+}
+group AddCondition(source e, target sec) {
+  e.resource : Condition as c -> sec.entry as ref then CondRef(c, ref) "ref";
+}
+group CondRef(source c : Condition, target ref) { c.id as id -> ref.reference = append('Condition/', id) "r"; }
+
+// ── Medications section (LOINC 42346-7) ← MedicationStatement ────────────────
+group MedsSection(source src : BundleSrc, target sec) {
+  src -> sec.title = 'Medications' "t";
+  src -> sec.code = cc('http://loinc.org', '42346-7') "c";
+  src.entry as e -> sec then AddMed(e, sec) "e";
+}
+group AddMed(source e, target sec) {
+  e.resource : MedicationStatement as m -> sec.entry as ref then MedRef(m, ref) "ref";
+}
+group MedRef(source m : MedicationStatement, target ref) { m.id as id -> ref.reference = append('MedicationStatement/', id) "r"; }
+
+// ── Attachments section (LOINC 55107-7) ← DocumentReference ──────────────────
+group AttachSection(source src : BundleSrc, target sec) {
+  src -> sec.title = 'Attachments' "t";
+  src -> sec.code = cc('http://loinc.org', '55107-7') "c";
+  src.entry as e -> sec then AddDoc(e, sec) "e";
+}
+group AddDoc(source e, target sec) {
+  e.resource : DocumentReference as d -> sec.entry as ref then DocRef(d, ref) "ref";
+}
+group DocRef(source d : DocumentReference, target ref) { d.id as id -> ref.reference = append('DocumentReference/', id) "r"; }

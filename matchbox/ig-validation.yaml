@@ -1,0 +1,23 @@
+# =============================================================================
+# Matchbox — IG load for CH eToC profile VALIDATION (k8s only).
+#
+# Layered on top of the shared, transform-only application.yaml via
+# spring.config.additional-location (see the Deployment command in
+# matchbox.yaml). docker compose does NOT load this file: the dev host (3 GB
+# container) can't hold the validation engine — see BACKLOG.md.
+#
+# Only the TARGET IG is loaded: $validate checks the transform OUTPUT against
+# ch-etoc-document. ch.fhir.ig.ch-etoc#3.0.1 pulls 11 packages (~290 MB: ch-core,
+# ch-orf, ch-term, sdc, extensions, terminology). The source-side
+# ch.fhir.ig.ch-umzh-connect would pull 23 packages (~770 MB) and is not needed
+# for this check.
+#
+# Packages are fetched from packages.fhir.org / packages.simplifier.net through
+# the proxy at first boot and persisted in H2 on the /database PVC.
+# =============================================================================
+hapi:
+  fhir:
+    implementationguides:
+      ch-etoc:
+        name: ch.fhir.ig.ch-etoc
+        version: 3.0.1

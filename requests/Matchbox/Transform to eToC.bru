@@ -1,0 +1,592 @@
+meta {
+  name: Transform to eToC
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{matchboxUrl}}/StructureMap/$transform?source=http://umzhconnect.ch/fhir/StructureMap/ServiceRequestBundleToChEtoc
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/fhir+json
+  Accept: application/fhir+json
+}
+
+body:json {
+  {
+    "resourceType": "Bundle",
+    "id": "04b1c938-e678-40aa-9d5c-bdf1583a555e",
+    "meta": {
+      "lastUpdated": "2026-09-01T12:12:46.467+00:00"
+    },
+    "type": "searchset",
+    "total": 1,
+    "link": [
+      {
+        "relation": "self",
+        "url": "https://api.placer.org/fhir/ServiceRequest?_id=ReferralOrthopedicSurgery&_include=ServiceRequest%3Apatient&_include=ServiceRequest%3Asubject&_include=ServiceRequest%3Arequester&_include=ServiceRequest%3Areason-reference&_include=ServiceRequest%3Asupporting-info&_include=ServiceRequest%3Ainsurance&_include:iterate=PractitionerRole%3Apractitioner"
+      }
+    ],
+    "entry": [
+      {
+        "fullUrl": "https://api.placer.org/fhir/ServiceRequest/ReferralOrthopedicSurgery",
+        "resource": {
+          "resourceType": "ServiceRequest",
+          "id": "ReferralOrthopedicSurgery",
+          "meta": {
+            "versionId": "1",
+            "lastUpdated": "2026-09-01T12:02:19.295+00:00",
+            "profile": [
+              "http://fhir.ch/ig/ch-etoc/StructureDefinition/ch-etoc-servicerequest"
+            ]
+          },
+          "identifier": [
+            {
+              "type": {
+                "coding": [
+                  {
+                    "system": "http://terminology.hl7.org/CodeSystem/v2-0203",
+                    "code": "PLAC"
+                  }
+                ]
+              },
+              "value": "REF-2025-001"
+            }
+          ],
+          "status": "active",
+          "intent": "order",
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "183545006",
+                  "display": "Referral to orthopedic service (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/PetraMeier"
+          },
+          "authoredOn": "2025-12-15",
+          "requester": {
+            "reference": "PractitionerRole/HansMusterRole"
+          },
+          "performer": [
+            {
+              "reference": "https://registry.umzhconnect.ch/fhir/Organization/HospitalF"
+            }
+          ],
+          "reasonReference": [
+            {
+              "reference": "Condition/SuspectedACLRupture"
+            }
+          ],
+          "insurance": [
+            {
+              "reference": "Coverage/CoverageMeier"
+            }
+          ],
+          "supportingInfo": [
+            {
+              "reference": "Condition/HeartFailureHFrEF"
+            },
+            {
+              "reference": "MedicationStatement/MedicationEntresto"
+            },
+            {
+              "reference": "MedicationStatement/MedicationConcor"
+            },
+            {
+              "reference": "DocumentReference/DocCardiologyAttachment"
+            }
+          ],
+          "note": [
+            {
+              "text": "Suspected rupture of the left ACL. Patient fell on ice. Positive Lachman test. Please evaluate for surgical intervention."
+            }
+          ]
+        },
+        "search": {
+          "mode": "match"
+        }
+      },
+      {
+        "fullUrl": "https://api.placer.org/fhir/Patient/PetraMeier",
+        "resource": {
+          "resourceType": "Patient",
+          "id": "PetraMeier",
+          "meta": {
+            "versionId": "1",
+            "lastUpdated": "2026-09-01T12:02:19.295+00:00",
+            "profile": [
+              "http://fhir.ch/ig/ch-core/StructureDefinition/ch-core-patient"
+            ]
+          },
+          "identifier": [
+            {
+              "type": {
+                "coding": [
+                  {
+                    "system": "http://terminology.hl7.org/CodeSystem/v2-0203",
+                    "code": "MR"
+                  }
+                ]
+              },
+              "system": "urn:oid:2.999.1.2.3.4",
+              "value": "P06543"
+            },
+            {
+              "system": "urn:oid:2.16.756.5.32",
+              "value": "7562295883070"
+            }
+          ],
+          "active": true,
+          "name": [
+            {
+              "family": "Meier",
+              "given": [
+                "Petra"
+              ]
+            }
+          ],
+          "telecom": [
+            {
+              "system": "phone",
+              "value": "+41 33 333 33 33",
+              "use": "mobile"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1992-03-26",
+          "address": [
+            {
+              "line": [
+                "Musterstrasse 1"
+              ],
+              "city": "Zurich",
+              "postalCode": "8000",
+              "country": "CH"
+            }
+          ]
+        },
+        "search": {
+          "mode": "include"
+        }
+      },
+      {
+        "fullUrl": "https://api.placer.org/fhir/PractitionerRole/HansMusterRole",
+        "resource": {
+          "resourceType": "PractitionerRole",
+          "id": "HansMusterRole",
+          "meta": {
+            "versionId": "1",
+            "lastUpdated": "2026-09-01T12:02:19.295+00:00",
+            "profile": [
+              "http://fhir.ch/ig/ch-core/StructureDefinition/ch-core-practitionerrole"
+            ]
+          },
+          "active": true,
+          "practitioner": {
+            "reference": "Practitioner/HansMuster"
+          },
+          "organization": {
+            "reference": "https://registry.umzhconnect.ch/fhir/Organization/HospitalP"
+          },
+          "code": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "309343006",
+                  "display": "Physician"
+                }
+              ]
+            }
+          ]
+        },
+        "search": {
+          "mode": "include"
+        }
+      },
+      {
+        "fullUrl": "https://api.placer.org/fhir/Practitioner/HansMuster",
+        "resource": {
+          "resourceType": "Practitioner",
+          "id": "HansMuster",
+          "meta": {
+            "profile": [
+              "http://fhir.ch/ig/ch-core/StructureDefinition/ch-core-practitioner"
+            ]
+          },
+          "identifier": [
+            {
+              "system": "urn:oid:2.51.1.3",
+              "value": "7601000000101"
+            }
+          ],
+          "active": true,
+          "name": [
+            {
+              "family": "Muster",
+              "given": [
+                "Hans"
+              ],
+              "prefix": [
+                "Dr. med."
+              ]
+            }
+          ]
+        },
+        "search": {
+          "mode": "include"
+        }
+      },
+      {
+        "fullUrl": "https://api.placer.org/fhir/Condition/SuspectedACLRupture",
+        "resource": {
+          "resourceType": "Condition",
+          "id": "SuspectedACLRupture",
+          "meta": {
+            "versionId": "1",
+            "lastUpdated": "2026-09-01T12:02:19.295+00:00",
+            "profile": [
+              "http://fhir.ch/ig/ch-etoc/StructureDefinition/ch-etoc-primary-diagnosis"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "verificationStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-ver-status",
+                "code": "provisional"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://fhir.ch/ig/ch-etoc/CodeSystem/ch-etoc-conditioncategory",
+                  "code": "primary-diagnosis",
+                  "display": "Primary Diagnosis"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "698065004",
+                "display": "Rupture of anterior cruciate ligament"
+              }
+            ],
+            "text": "Suspected rupture of the left anterior cruciate ligament (ACL). Positive Lachman test."
+          },
+          "bodySite": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "82169009",
+                  "display": "Structure of anterior cruciate ligament of knee joint"
+                }
+              ],
+              "text": "Left knee - anterior cruciate ligament"
+            }
+          ],
+          "subject": {
+            "reference": "Patient/PetraMeier"
+          },
+          "recordedDate": "2025-12-15"
+        },
+        "search": {
+          "mode": "include"
+        }
+      },
+      {
+        "fullUrl": "https://api.placer.org/fhir/Condition/HeartFailureHFrEF",
+        "resource": {
+          "resourceType": "Condition",
+          "id": "HeartFailureHFrEF",
+          "meta": {
+            "versionId": "1",
+            "lastUpdated": "2026-09-01T12:02:19.295+00:00",
+            "profile": [
+              "http://fhir.ch/ig/ch-etoc/StructureDefinition/ch-etoc-secondary-diagnosis"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "verificationStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-ver-status",
+                "code": "confirmed"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://fhir.ch/ig/ch-etoc/CodeSystem/ch-etoc-conditioncategory",
+                  "code": "secondary-diagnosis",
+                  "display": "Secondary Diagnosis"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "441481004",
+                "display": "Chronic systolic heart failure"
+              }
+            ],
+            "text": "Chronic systolic (congestive) heart failure (HFrEF)"
+          },
+          "subject": {
+            "reference": "Patient/PetraMeier"
+          }
+        },
+        "search": {
+          "mode": "include"
+        }
+      },
+      {
+        "fullUrl": "https://api.placer.org/fhir/MedicationStatement/MedicationEntresto",
+        "resource": {
+          "resourceType": "MedicationStatement",
+          "id": "MedicationEntresto",
+          "meta": {
+            "versionId": "1",
+            "lastUpdated": "2026-09-01T12:02:19.295+00:00"
+          },
+          "status": "active",
+          "medicationCodeableConcept": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "716107003",
+                "display": "Product containing sacubitril and valsartan"
+              }
+            ],
+            "text": "Entresto 200mg film tablet (Sacubitril/Valsartan)"
+          },
+          "subject": {
+            "reference": "Patient/PetraMeier"
+          },
+          "dosage": [
+            {
+              "text": "1 tablet oral, morning/noon/evening",
+              "timing": {
+                "repeat": {
+                  "frequency": 3,
+                  "period": 1,
+                  "periodUnit": "d"
+                }
+              },
+              "route": {
+                "coding": [
+                  {
+                    "system": "http://snomed.info/sct",
+                    "code": "26643006",
+                    "display": "Oral route"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "search": {
+          "mode": "include"
+        }
+      },
+      {
+        "fullUrl": "https://api.placer.org/fhir/MedicationStatement/MedicationConcor",
+        "resource": {
+          "resourceType": "MedicationStatement",
+          "id": "MedicationConcor",
+          "meta": {
+            "versionId": "1",
+            "lastUpdated": "2026-09-01T12:02:19.295+00:00"
+          },
+          "status": "active",
+          "medicationCodeableConcept": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "318475005",
+                "display": "Product containing bisoprolol"
+              }
+            ],
+            "text": "Concor 10mg film tablet (Bisoprolol fumarat)"
+          },
+          "subject": {
+            "reference": "Patient/PetraMeier"
+          },
+          "dosage": [
+            {
+              "text": "1 tablet oral, morning",
+              "timing": {
+                "repeat": {
+                  "frequency": 1,
+                  "period": 1,
+                  "periodUnit": "d"
+                }
+              },
+              "route": {
+                "coding": [
+                  {
+                    "system": "http://snomed.info/sct",
+                    "code": "26643006",
+                    "display": "Oral route"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "search": {
+          "mode": "include"
+        }
+      },
+      {
+        "fullUrl": "https://api.placer.org/fhir/Coverage/CoverageMeier",
+        "resource": {
+          "resourceType": "Coverage",
+          "id": "CoverageMeier",
+          "meta": {
+            "versionId": "1",
+            "lastUpdated": "2026-09-01T12:02:19.295+00:00"
+          },
+          "identifier": [
+            {
+              "type": {
+                "coding": [
+                  {
+                    "system": "http://fhir.ch/ig/ch-orf/CodeSystem/ch-orf-cs-coverageidentifiertype",
+                    "code": "VeKa"
+                  }
+                ]
+              },
+              "system": "http://ehic.com/insurer",
+              "value": "80756015090002647590"
+            }
+          ],
+          "status": "active",
+          "type": {
+            "coding": [
+              {
+                "system": "http://fhir.ch/ig/ch-core/CodeSystem/bfs-medstats-25-mainguarantor",
+                "code": "1",
+                "display": "Krankenversicherung (obligat.)"
+              }
+            ]
+          },
+          "beneficiary": {
+            "reference": "Patient/PetraMeier"
+          },
+          "payor": [
+            {
+              "display": "Krankenkasse AG"
+            }
+          ]
+        },
+        "search": {
+          "mode": "include"
+        }
+      },
+      {
+        "fullUrl": "https://api.placer.org/fhir/DocumentReference/DocCardiologyAttachment",
+        "resource": {
+          "resourceType": "DocumentReference",
+          "id": "DocCardiologyAttachment",
+          "meta": {
+            "versionId": "1",
+            "lastUpdated": "2026-09-01T12:02:19.295+00:00"
+          },
+          "status": "current",
+          "type": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "34133-9",
+                "display": "Summary of episode note"
+              }
+            ],
+            "text": "Cardiology clinic report"
+          },
+          "subject": {
+            "reference": "Patient/PetraMeier"
+          },
+          "date": "2025-12-19T10:00:00+01:00",
+          "content": [
+            {
+              "attachment": {
+                "contentType": "application/pdf",
+                "title": "Cardiology_Report_PetraMeier_2025.pdf",
+                "creation": "2025-12-19"
+              }
+            }
+          ]
+        },
+        "search": {
+          "mode": "include"
+        }
+      }
+    ]
+  }
+}
+
+script:post-response {
+  // Hand the eToC document to "Validate eToC document" (runs next in the folder).
+  if (res.getStatus() === 200) {
+    bru.setVar("etocDocument", JSON.stringify(res.getBody()));
+  }
+}
+
+tests {
+  test("returns 200", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+
+  test("returns a CH eToC document Bundle led by a Composition", function() {
+    const body = res.getBody();
+    expect(body.resourceType).to.equal("Bundle");
+    expect(body.type).to.equal("document");
+    expect(body.entry[0].resource.resourceType).to.equal("Composition");
+  });
+}
+
+docs {
+  Runs the CH eToC StructureMap over the placer's ServiceRequest search Bundle
+  (the exact getServiceRequest response shape, incl. the requester's
+  Practitioner via _include:iterate=PractitionerRole:practitioner) and returns a
+  CH eToC document Bundle. The map must be loaded first: on k8s the
+  matchbox-load-maps Job does that after deploy; locally run
+  matchbox/test-transform.sh once. Otherwise you get 422 "Map not available".
+  Canonical: http://umzhconnect.ch/fhir/StructureMap/ServiceRequestBundleToChEtoc
+  The result is stored in the runtime var etocDocument, which
+  "Validate eToC document" then validates — run the Matchbox folder in order.
+}
