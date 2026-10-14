@@ -1,0 +1,46 @@
+# =============================================================================
+# Matchbox — FHIR Mapping Language (StructureMap) transformation engine.
+#
+# TRANSFORM-ONLY base config (shared by compose and k8s). The referral flow's
+# StructureMap uses only base-R4 types, so matchbox needs no IG packages to RUN
+# the transform. Loading the CH IG closure (for profile validation) is what makes
+# matchbox memory-heavy — it OOM-kills a 3 GB dev container. So this file loads
+# no `implementationguides`; matchbox boots lean (base R4 only) in ~2 GB.
+# On k8s, ig-validation.yaml is layered on top and loads ch.fhir.ig.ch-etoc so
+# matchbox can also $validate against the CH eToC profiles (8Gi pod). Compose
+# stays transform-only (see BACKLOG.md).
+#
+# matchbox reads this file at /config/application.yaml (entrypoint uses
+# -Dspring.config.additional-location=optional:file:/config/application.yaml).
+# The SAME file is bind-mounted by docker compose at /config and generated into a
+# ConfigMap by kustomize (see kustomization.yaml `matchbox-config`).
+#
+# The transform map is CUSTOM (CH eToC ships none): author it in FHIR Mapping
+# Language and POST it (text/fhir-mapping); with a persistent /database it
+# survives restarts.
+# =============================================================================
+server:
+  servlet:
+    # Matchbox serves FHIR under this context path; the workflow's transform URL
+    # (…/matchboxv3/fhir/StructureMap/$transform) depends on it.
+    context-path: /matchboxv3
+
+matchbox:
+  fhir:
+    context:
+      # R4 (4.0.1) — the FHIR version CH eToC and this whole stack use.
+      fhirVersion: 4.0.1
+      # No external terminology server (no tx.fhir.org egress).
+      txServer: n/a
+      # true = single shared engine that ACCEPTS runtime conformance updates —
+      # so you can POST your custom StructureMap after startup and have
+      # $transform use it.
+      onlyOneEngine: true
+
+hapi:
+  fhir:
+    # Backed by matchbox's bundled embedded H2 (jdbc:h2:file:./database/h2 →
+    # /database). Mount a PVC/volume at /database to persist the POSTed map.
+    fhir_version: R4
+    # No implementationguides here — the CH eToC IG load for validation lives
+    # in ig-validation.yaml (k8s only).
