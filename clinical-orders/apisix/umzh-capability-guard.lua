@@ -48,13 +48,6 @@ local schema = {
     -- `from`, for move/copy) must address one of these top-level elements.
     -- Empty ⇒ not enforced (non-PATCH routes leave this unset).
     patchable_fields = { type = "array", items = { type = "string" }, default = {} },
-    -- When false, SKIP the search-param / _include / _include:iterate / required
-    -- allowlist checks —
-    -- those are enforced in OPA (umzh.capabilities) instead, which is necessary
-    -- on a single catch-all /fhir route where the allowlist varies per resource
-    -- type. The type-independent checks (modifiers, chains, _id cardinality, arg
-    -- count) and patchable_fields still run. Default true = full edge enforcement.
-    enforce_param_allowlist = { type = "boolean", default = true },
   },
   -- Reject unknown keys at config-load time. Without this a typo fails open in
   -- one case: misspelling `require` (e.g. `requires`) would silently drop the
@@ -105,7 +98,6 @@ function _M.access(conf, ctx)
     return reject("invalid", "too many query parameters")
   end
   args = args or {}
-  local enforce        = conf.enforce_param_allowlist ~= false
   local allow_params   = to_set(conf.allow_params)
   local allow_includes = to_set(conf.allow_includes)
   local allow_include_iterates = to_set(conf.allow_include_iterates)
@@ -114,14 +106,12 @@ function _M.access(conf, ctx)
     if key == "_include" or key == "_include:iterate" then
       -- `_include` / `_include:iterate` are permitted, but only for enumerated
       -- values, each from its own list. An empty list therefore rejects every
-      -- value. Skipped when the allowlist is enforced downstream in OPA.
-      if enforce then
-        local allowed = (key == "_include") and allow_includes or allow_include_iterates
-        local vals = (type(val) == "table") and val or { val }
-        for _, v in ipairs(vals) do
-          if not allowed[v] then
-            return reject("not-supported", "unsupported " .. key .. " value: " .. tostring(v))
-          end
+      -- value.
+      local allowed = (key == "_include") and allow_includes or allow_include_iterates
+      local vals = (type(val) == "table") and val or { val }
+      for _, v in ipairs(vals) do
+        if not allowed[v] then
+          return reject("not-supported", "unsupported " .. key .. " value: " .. tostring(v))
         end
       end
 
@@ -137,9 +127,8 @@ function _M.access(conf, ctx)
       if key:find(":", 1, true) then
         return reject("not-supported", "search parameter modifier not supported: " .. key)
       end
-      -- Deny-by-default param allowlist. Skipped when enforced in OPA — but the
-      -- syntax checks above and the _id cardinality check below still apply.
-      if enforce and not allow_params[key] then
+      -- Deny-by-default param allowlist.
+      if not allow_params[key] then
         return reject("not-supported", "unsupported search parameter: " .. key)
       end
       -- _id must identify a single resource — always.
@@ -154,18 +143,15 @@ function _M.access(conf, ctx)
     end
   end
 
-  -- Required parameters present? Skipped when enforced in OPA.
-  if enforce then
-    for _, req in ipairs(conf["require"] or {}) do
-      if args[req] == nil then
-        return reject("required", "missing required search parameter: " .. req)
-      end
+  -- Required parameters present?
+  for _, req in ipairs(conf["require"] or {}) do
+    if args[req] == nil then
+      return reject("required", "missing required search parameter: " .. req)
     end
   end
 
   -- PATCH body field allowlist (FHIR JSON-Patch). Only enforced when configured
-  -- AND the request is a PATCH — a catch-all route carrying this config must not
-  -- apply the JSON-Patch body check to GET/POST/etc.
+  -- AND the request is a PATCH, so the body check never applies to GET/POST/etc.
   if conf.patchable_fields and #conf.patchable_fields > 0 and ngx.req.get_method() == "PATCH" then
     local allow_fields = to_set(conf.patchable_fields)
     ngx.req.read_body()

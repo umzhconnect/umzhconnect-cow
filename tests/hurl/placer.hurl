@@ -76,6 +76,24 @@ Authorization: Bearer {{token}}
 HTTP 400
 [Asserts]
 jsonpath "$.resourceType" == "OperationOutcome"
+jsonpath "$.issue[0].diagnostics" contains "unsupported _include:iterate value: Observation:subject"
+
+# _include:recurse (the older name for :iterate, still honoured by HAPI) is
+# rejected as a modifier, so it cannot get around the iterate allowlist.
+GET {{gateway_url}}/fhir/ServiceRequest?_id={{sr_id}}&_include=ServiceRequest:requester&_include:recurse=PractitionerRole:practitioner
+Authorization: Bearer {{token}}
+HTTP 400
+[Asserts]
+jsonpath "$.issue[0].diagnostics" contains "modifier not supported: _include:recurse"
+
+# A direct _include value may not iterate: iterating re-applies it to every
+# ServiceRequest the result set picks up (e.g. via supportingInfo), which can
+# walk out of the SR graph.
+GET {{gateway_url}}/fhir/ServiceRequest?_id={{sr_id}}&_include:iterate=ServiceRequest:subject
+Authorization: Bearer {{token}}
+HTTP 400
+[Asserts]
+jsonpath "$.issue[0].diagnostics" contains "unsupported _include:iterate value: ServiceRequest:subject"
 
 # A resource that is NOT in the SR graph → OPA denies (403), end to end.
 GET {{gateway_url}}/fhir/Patient/not-in-graph
