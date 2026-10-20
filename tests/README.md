@@ -70,7 +70,7 @@ skips the role scenarios.
 |------|------|--------|
 | `01-health.hurl` | none | gateway `/healthz` + `/jwks.json`, custodian, OPA |
 | `02-auth-negative.hurl` | none | gateway rejects missing / malformed / tampered bearer → `401` |
-| `placer.hurl` | token | **this node as placer** — no-bearer `401`; authorized `ServiceRequest` search + `_include`, read-by-id of the SR and a referenced `Patient` (OPA Rule 4); negatives: no `_id` → 400, not-in-graph → 403 |
+| `placer.hurl` | token | **this node as placer** — no-bearer `401`; authorized `ServiceRequest` search + `_include` / allowlisted `_include:iterate` (requester `PractitionerRole` → `Practitioner`), read-by-id of the SR and a referenced `Patient` (OPA Rule 4); negatives: no `_id` → 400, non-allowlisted `_include:iterate` → 400, not-in-graph → 403 |
 | `fulfiller.hurl` | token | **this node as fulfiller** — no-bearer `401`; Task create (1c), list/read (1a/1b), patch a patchable field (1d); negatives: non-patchable field → 400, non-owned patch → 403 |
 
 ### Auth source — mock or real
@@ -99,7 +99,8 @@ mints each scenario's token and passes it to Hurl, so the Hurl files never chang
 ### Seeding (test data lifecycle)
 
 In production `clinical-orders` ships empty (the mCSD registry is its own
-deployment). `placer.hurl` needs a `ServiceRequest` + `Patient` + `Consent`, so
+deployment). `placer.hurl` needs a `ServiceRequest` + `Patient` + `Consent` (plus the SR's requester
+`PractitionerRole` → `Practitioner` for the `_include:iterate` check), so
 `run-tests.sh` seeds them via
 the **internal `clinical-orders` proxy** (`:9091`, no auth) before the run and
 removes them afterward (an `EXIT` trap). `fulfiller.hurl` creates its own Tasks

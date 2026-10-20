@@ -13,11 +13,28 @@
     },
     {
       "resource": {
+        "resourceType": "Practitioner",
+        "id": "prac-e2e",
+        "name": [{ "family": "E2E", "given": ["Doctor"] }]
+      },
+      "request": { "method": "PUT", "url": "Practitioner/prac-e2e" }
+    },
+    {
+      "resource": {
+        "resourceType": "PractitionerRole",
+        "id": "prrole-e2e",
+        "practitioner": { "reference": "Practitioner/prac-e2e" }
+      },
+      "request": { "method": "PUT", "url": "PractitionerRole/prrole-e2e" }
+    },
+    {
+      "resource": {
         "resourceType": "ServiceRequest",
         "id": "sr-e2e",
         "status": "active",
         "intent": "order",
         "subject": { "reference": "Patient/pat-e2e" },
+        "requester": { "reference": "PractitionerRole/prrole-e2e" },
         "code": { "text": "Orthopedic referral (e2e test)" }
       },
       "request": { "method": "PUT", "url": "ServiceRequest/sr-e2e" }

@@ -35,6 +35,17 @@ HTTP 200
 [Asserts]
 jsonpath "$.entry[*].resource.resourceType" includes "Patient"
 
+# An allowlisted _include:iterate value passes the capability-guard: the SR's
+# requester (PractitionerRole) is included, and iterating
+# PractitionerRole:practitioner pulls in the referenced Practitioner too.
+GET {{gateway_url}}/fhir/ServiceRequest?_id={{sr_id}}&_include=ServiceRequest:requester&_include:iterate=PractitionerRole:practitioner
+Authorization: Bearer {{token}}
+Cache-Control: no-cache
+HTTP 200
+[Asserts]
+jsonpath "$.entry[*].resource.resourceType" includes "PractitionerRole"
+jsonpath "$.entry[*].resource.resourceType" includes "Practitioner"
+
 # Read the ServiceRequest by id.
 GET {{gateway_url}}/fhir/ServiceRequest/{{sr_id}}
 Authorization: Bearer {{token}}
@@ -54,6 +65,13 @@ jsonpath "$.id" == "{{pat_id}}"
 
 # ServiceRequest search without _id → capability-guard 400.
 GET {{gateway_url}}/fhir/ServiceRequest
+Authorization: Bearer {{token}}
+HTTP 400
+[Asserts]
+jsonpath "$.resourceType" == "OperationOutcome"
+
+# _include:iterate with a value that is not allowlisted → capability-guard 400.
+GET {{gateway_url}}/fhir/ServiceRequest?_id={{sr_id}}&_include:iterate=Observation:subject
 Authorization: Bearer {{token}}
 HTTP 400
 [Asserts]
