@@ -12,7 +12,9 @@
 -- normalizing for FHIR parameter syntax:
 --   * every name in `require` is present
 --   * `_id` (when allowed) is single-valued (no comma-OR, no repeats)
---   * `_include` values ∈ allow_includes  (rejects `*`, `:iterate`, unknowns)
+--   * `_include` values ∈ allow_includes  (rejects `*`, unknowns)
+--   * `_include:iterate` values ∈ allow_include_iterates (rejects `*`, unknowns;
+--     the only `:modifier` accepted on any key)
 --   * every other key's BASE name ∈ allow_params, with NO `:modifier` and NO
 --     `.chain`
 --
@@ -37,11 +39,17 @@ local schema = {
     allow_params   = { type = "array", items = { type = "string" }, default = {} },
     -- Permitted `_include` values, verbatim (e.g. "ServiceRequest:patient").
     allow_includes = { type = "array", items = { type = "string" }, default = {} },
+    -- Permitted `_include:iterate` values, verbatim (e.g. "DiagnosticReport:result").
+    -- A separate list from allow_includes: a value permitted as a direct include
+    -- is NOT thereby permitted to iterate, and vice versa. Empty ⇒ every
+    -- `_include:iterate` is rejected.
+    allow_include_iterates = { type = "array", items = { type = "string" }, default = {} },
     -- FHIR JSON-Patch field allowlist (PATCH routes): every op's `path` (and
     -- `from`, for move/copy) must address one of these top-level elements.
     -- Empty ⇒ not enforced (non-PATCH routes leave this unset).
     patchable_fields = { type = "array", items = { type = "string" }, default = {} },
-    -- When false, SKIP the search-param / _include / required allowlist checks —
+    -- When false, SKIP the search-param / _include / _include:iterate / required
+    -- allowlist checks —
     -- those are enforced in OPA (umzh.capabilities) instead, which is necessary
     -- on a single catch-all /fhir route where the allowlist varies per resource
     -- type. The type-independent checks (modifiers, chains, _id cardinality, arg
@@ -100,17 +108,19 @@ function _M.access(conf, ctx)
   local enforce        = conf.enforce_param_allowlist ~= false
   local allow_params   = to_set(conf.allow_params)
   local allow_includes = to_set(conf.allow_includes)
+  local allow_include_iterates = to_set(conf.allow_include_iterates)
 
   for key, val in pairs(args) do
-    if key == "_include" then
-      -- `_include` is permitted, but only for enumerated values. An empty
-      -- allow_includes therefore rejects every `_include`. Skipped when the
-      -- allowlist is enforced downstream in OPA.
+    if key == "_include" or key == "_include:iterate" then
+      -- `_include` / `_include:iterate` are permitted, but only for enumerated
+      -- values, each from its own list. An empty list therefore rejects every
+      -- value. Skipped when the allowlist is enforced downstream in OPA.
       if enforce then
+        local allowed = (key == "_include") and allow_includes or allow_include_iterates
         local vals = (type(val) == "table") and val or { val }
         for _, v in ipairs(vals) do
-          if not allow_includes[v] then
-            return reject("not-supported", "unsupported _include value: " .. tostring(v))
+          if not allowed[v] then
+            return reject("not-supported", "unsupported " .. key .. " value: " .. tostring(v))
           end
         end
       end
@@ -121,8 +131,9 @@ function _M.access(conf, ctx)
         return reject("not-supported", "chained search parameter not supported: " .. key)
       end
       -- Modifier (_id:above, code:text) or reverse-chain (_has:...); also
-      -- catches _revinclude:iterate — always rejected. (_include's colon is in
-      -- the value, above.)
+      -- catches _revinclude:iterate and _include:recurse — always rejected.
+      -- (_include's colon is in the value, and _include:iterate is handled
+      -- above.)
       if key:find(":", 1, true) then
         return reject("not-supported", "search parameter modifier not supported: " .. key)
       end

@@ -69,6 +69,10 @@ routes:
           - "Task:ch-umzhconnectig-task-inputreference"
           - "Task:ch-umzhconnectig-task-outputreference"
           - "Task:ch-umzhconnectig-task-outputcanonical"
+        allow_include_iterates:
+          - "DiagnosticReport:result"
+          - "MedicationStatement:medication"
+          - "PractitionerRole:practitioner"
       opa:
         host: "${{OPA_URL}}"
         policy: "umzh/authz/gateway"
@@ -182,6 +186,10 @@ routes:
           - "ServiceRequest:ch-umzhconnectig-servicerequest-reasonreference"
           - "ServiceRequest:ch-umzhconnectig-servicerequest-supportinginfo"
           - "ServiceRequest:ch-umzhconnectig-servicerequest-insurance"
+        allow_include_iterates:
+          - "DiagnosticReport:result"
+          - "MedicationStatement:medication"
+          - "PractitionerRole:practitioner"
       opa:
         host: "${{OPA_URL}}"
         policy: "umzh/authz/gateway"
