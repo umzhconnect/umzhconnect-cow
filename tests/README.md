@@ -70,7 +70,7 @@ skips the role scenarios.
 |------|------|--------|
 | `01-health.hurl` | none | gateway `/healthz` + `/jwks.json`, custodian, OPA |
 | `02-auth-negative.hurl` | none | gateway rejects missing / malformed / tampered bearer → `401` |
-| `placer.hurl` | token | **this node as placer** — no-bearer `401`; authorized `ServiceRequest` search + `_include` / allowlisted `_include:iterate` (requester `PractitionerRole` → `Practitioner`), read-by-id of the SR and a referenced `Patient` (OPA Rule 4); negatives: no `_id` → 400, non-allowlisted `_include:iterate` → 400, not-in-graph → 403 |
+| `placer.hurl` | token | **this node as placer** — no-bearer `401`; authorized `ServiceRequest` search + `_include` / allowlisted `_include:iterate` (requester `PractitionerRole` → `Practitioner`), read-by-id of the SR and a referenced `Patient` (OPA Rule 4); negatives: no `_id` → 400, non-allowlisted `_include:iterate` (incl. a value allowlisted only for plain `_include`) → 400, `_include:recurse` → 400, not-in-graph → 403 |
 | `fulfiller.hurl` | token | **this node as fulfiller** — no-bearer `401`; Task create (1c), list/read (1a/1b), patch a patchable field (1d); negatives: non-patchable field → 400, non-owned patch → 403 |
 
 ### Auth source — mock or real
