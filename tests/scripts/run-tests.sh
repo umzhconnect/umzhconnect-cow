@@ -75,7 +75,7 @@ if curl -sf --max-time 5 "$auth_probe" > /dev/null 2>&1; then
     sh "$SCRIPT_DIR/seed.sh" up
     trap 'sh "$SCRIPT_DIR/seed.sh" down' EXIT
 
-    PLACER_TOKEN=$(SCOPE="system/ServiceRequest.r system/Patient.r" ORG_REF="${CALLER_ORG}" \
+    PLACER_TOKEN=$(SCOPE="system/ServiceRequest.r system/Patient.r system/PractitionerRole.r" ORG_REF="${CALLER_ORG}" \
         CONTEXT_REF="ServiceRequest/${SR_ID}" sh "$SCRIPT_DIR/get-token.sh" || true)
     # Combined SMART v2 scope (one scope granting create/read/update/search on Task);
     # read scopes stay per-type. Combined and per-type both satisfy has_smart_scope.
