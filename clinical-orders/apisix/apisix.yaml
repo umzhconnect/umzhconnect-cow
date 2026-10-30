@@ -59,7 +59,7 @@ routes:
         discovery: "${{AUTH_DISCOVERY_URL}}"
         bearer_only: true
         use_jwks: true
-        set_access_token_header: true
+        set_access_token_header: false
         set_userinfo_header: false
         client_id: "unused"
         client_secret: "unused"
@@ -92,7 +92,7 @@ routes:
         discovery: "${{AUTH_DISCOVERY_URL}}"
         bearer_only: true
         use_jwks: true
-        set_access_token_header: true
+        set_access_token_header: false
         set_userinfo_header: false
         client_id: "unused"
         client_secret: "unused"
@@ -114,7 +114,7 @@ routes:
         discovery: "${{AUTH_DISCOVERY_URL}}"
         bearer_only: true
         use_jwks: true
-        set_access_token_header: true
+        set_access_token_header: false
         set_userinfo_header: false
         client_id: "unused"
         client_secret: "unused"
@@ -144,7 +144,7 @@ routes:
         discovery: "${{AUTH_DISCOVERY_URL}}"
         bearer_only: true
         use_jwks: true
-        set_access_token_header: true
+        set_access_token_header: false
         set_userinfo_header: false
         client_id: "unused"
         client_secret: "unused"
@@ -172,7 +172,7 @@ routes:
         discovery: "${{AUTH_DISCOVERY_URL}}"
         bearer_only: true
         use_jwks: true
-        set_access_token_header: true
+        set_access_token_header: false
         set_userinfo_header: false
         client_id: "unused"
         client_secret: "unused"

@@ -83,6 +83,7 @@ services:
       - --server
       - --addr=0.0.0.0:8181
       - --log-level=info
+      - --skip-version-check
       - /policies
       - /config/opa-config.json
     volumes:
