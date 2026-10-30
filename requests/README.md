@@ -16,7 +16,7 @@ environment, and go.
   — a gateway or integration platform such as MuleSoft — asks OPA for a decision).
   See the dedicated section below.
 - **OPA** — **local dev only**: query the policy engine's *core* rules directly,
-  one request per rule (1a–6) plus a deny check, to see what each rule requires.
+  one request per rule (1a–5) plus a deny check, to see what each rule requires.
   This is NOT the external contract (see the ⚠️ below).
 
 ## OPA-external — how an external consumer calls OPA (the decision contract)
@@ -38,6 +38,8 @@ token and injects the backend address itself.
       "headers": { "authorization": "Bearer {{bearerToken}}" }
   } } }
   ```
+  Forward the request's `query` too, `{}` if it has none: OPA denies a Task search
+  without it.
 - **Response:** `{ "result": true }` (allow) or `{ "result": false }` (deny).
   Treat anything that is not `true` as **deny**.
 - **The consumer passes NO `fhir_base`, NO scope, NO org, NO context.** OPA decodes

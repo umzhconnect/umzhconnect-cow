@@ -90,6 +90,34 @@ canonical_path := input.request.path if {
 	resource_id == ""
 }
 
+# Every _include value, whatever the modifier. APISIX sends a lone value as a
+# string and repeated ones as an array.
+_as_array(v) := v if is_array(v)
+
+_as_array(v) := [v] if not is_array(v)
+
+includes := [value |
+	some key, raw in input.request.query
+	startswith(key, "_include")
+	some value in _as_array(raw)
+]
+
+# FHIR id syntax. Anything else can mean one resource to OPA's fetch and another
+# to HAPI's search.
+_valid_id if resource_id == ""
+
+_valid_id if regex.match(`^[A-Za-z0-9.-]{1,64}$`, resource_id)
+
+# The Task _include gate can't see what a PEP doesn't forward. Only a search can
+# include anything: HAPI refuses _include on a read.
+_query_forwarded if input.request.method != "GET"
+
+_query_forwarded if resource_type != "Task"
+
+_query_forwarded if resource_id != ""
+
+_query_forwarded if is_object(input.request.query)
+
 # ---------------------------------------------------------------------------
 # Delegate to main.rego with the mapped input shape
 # ---------------------------------------------------------------------------
@@ -106,12 +134,16 @@ canonical_path := input.request.path if {
 default allow := false
 
 allow if {
+	_valid_id
+	_query_forwarded
+
 	# Evaluate existing policy with the input shape it expects.
 	data.umzh.authz.allow with input as {
 		"method":        input.request.method,
 		"path":          canonical_path,
 		"resource_type": resource_type,
 		"resource_id":   resource_id,
+		"includes":      includes,
 		"token": {
 			"organization_reference": object.get(object.get(object.get(jwt_payload, "extensions", {}), "umzhconnect", {}), "organization_reference", ""),
 			"scope":                  object.get(jwt_payload, "scope", ""),

@@ -35,7 +35,8 @@ body:json {
 docs {
   Rule 4 — read within a ServiceRequest fhirContext graph. Requires
   system/<Type>.r AND an active, non-expired Consent (actor == caller) for the
-  ServiceRequest context AND the requested resource is in that SR's graph.
+  ServiceRequest context AND that ServiceRequest is active AND the requested
+  resource is in its graph.
 
   DATA-DEPENDENT: OPA fetches Consent?data=ServiceRequest/sr-e2e and
   ServiceRequest/sr-e2e. True only when those exist (the placer seed —
