@@ -5,10 +5,10 @@
 # OPA_URL, JWKS_UPSTREAM).
 #
 # This mirrors the sandbox's public external gateway
-# (services/apisix/external/apisix.yaml): the SAME per-operation route surface,
-# the SAME request filter injection (umzh-task-requester-inject), and the SAME
-# security layers (openid-connect JWT → umzh-capability-guard → OPA umzh/authz/
-# gateway). Two things differ, both structural to the party deployment:
+# (services/apisix/external/apisix.yaml): the SAME request filter injection
+# (umzh-task-requester-inject) and the SAME security layers (openid-connect JWT →
+# umzh-capability-guard → OPA umzh/authz/gateway). The routes follow the IG, not
+# the sandbox. Two other things differ, both structural to the party deployment:
 #
 #   1. Upstream is the clinical-orders-fhir proxy, not the base HAPI. That proxy
 #      maps /fhir/… → /fhir/clinical-orders/… and strips the partition from
@@ -64,11 +64,10 @@ routes:
         client_id: "unused"
         client_secret: "unused"
       umzh-capability-guard:
-        allow_params: ["owner", "requester", "status", "_id"]
+        allow_params: ["requester", "status", "_id", "_lastUpdated"]
         allow_includes:
-          - "Task:ch-umzhconnectig-task-inputreference"
-          - "Task:ch-umzhconnectig-task-outputreference"
-          - "Task:ch-umzhconnectig-task-outputcanonical"
+          - "Task:output-value-reference"
+          - "Task:output-value-canonical"
         allow_include_iterates:
           - "DiagnosticReport:result"
           - "MedicationStatement:medication"
@@ -129,8 +128,8 @@ routes:
       type: roundrobin
 
   # ─── FHIR read by ID — capability-guard (no params) + OPA consent gate ─
-  # Matches /fhir/<type>/<id> (two path segments). One-segment paths (/fhir/Task,
-  # /fhir/ServiceRequest) are handled by the search routes above.
+  # Matches /fhir/<type>/<id> (two path segments). One-segment paths are handled
+  # by the search routes.
   - id: ext-fhir-read
     uri: /fhir/*
     methods: [GET]
@@ -159,10 +158,7 @@ routes:
       type: roundrobin
 
   # ─── ServiceRequest search — capability-guard (_id required, enumerated
-  #     includes) + OPA consent gate. Only ServiceRequest is searchable
-  #     cross-party here; Task search is handled by ext-task-list above.
-  #     Clinical leaf types and QuestionnaireResponse have no search route, so a
-  #     search on them falls through to default-deny (404).
+  #     includes) + OPA consent gate.
   - id: ext-sr-search
     uri: /fhir/ServiceRequest
     methods: [GET]
@@ -183,10 +179,57 @@ routes:
           - "ServiceRequest:patient"
           - "ServiceRequest:subject"
           - "ServiceRequest:requester"
-          - "ServiceRequest:ch-umzhconnectig-servicerequest-reasonreference"
-          - "ServiceRequest:ch-umzhconnectig-servicerequest-supportinginfo"
-          - "ServiceRequest:ch-umzhconnectig-servicerequest-insurance"
+          - "ServiceRequest:reason-reference"
+          - "ServiceRequest:supporting-info"
+          - "ServiceRequest:insurance"
         allow_include_iterates:
+          - "DiagnosticReport:result"
+          - "MedicationStatement:medication"
+          - "PractitionerRole:practitioner"
+      opa:
+        host: "${{OPA_URL}}"
+        policy: "umzh/authz/gateway"
+    upstream:
+      nodes:
+        "clinical-orders-fhir:8080": 1
+      type: roundrobin
+
+  # ─── Read-only types search — capability-guard (_id required, the IG's
+  #     second-level includes; a value for another type has no effect) + OPA.
+  - id: ext-readonly-search
+    uris:
+      - /fhir/AllergyIntolerance
+      - /fhir/Appointment
+      - /fhir/Condition
+      - /fhir/Coverage
+      - /fhir/DiagnosticReport
+      - /fhir/DocumentReference
+      - /fhir/ImagingStudy
+      - /fhir/Immunization
+      - /fhir/Medication
+      - /fhir/MedicationStatement
+      - /fhir/Observation
+      - /fhir/Organization
+      - /fhir/Patient
+      - /fhir/Practitioner
+      - /fhir/PractitionerRole
+      - /fhir/Procedure
+      - /fhir/QuestionnaireResponse
+    methods: [GET]
+    priority: 10
+    plugins:
+      openid-connect:
+        discovery: "${{AUTH_DISCOVERY_URL}}"
+        bearer_only: true
+        use_jwks: true
+        set_access_token_header: false
+        set_userinfo_header: false
+        client_id: "unused"
+        client_secret: "unused"
+      umzh-capability-guard:
+        require: ["_id"]
+        allow_params: ["_id"]
+        allow_includes:
           - "DiagnosticReport:result"
           - "MedicationStatement:medication"
           - "PractitionerRole:practitioner"

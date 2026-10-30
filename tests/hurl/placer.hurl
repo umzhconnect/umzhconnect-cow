@@ -4,7 +4,7 @@
 # (fulfiller) carrying a fhirContext token. Consent/fhirContext-gated (OPA Rule 4).
 #
 # {{token}} is minted by the runner (mock or real source) with
-#   scope: system/ServiceRequest.r system/Patient.r
+#   scope: system/ServiceRequest.r system/Patient.r system/PractitionerRole.r
 #   fhirContext: ServiceRequest/{{sr_id}}
 #   organization_reference: the org the seeded Consent names as actor.
 # Fixtures seeded by tests/scripts/seed.sh up. Consent-actor-mismatch and other
@@ -61,6 +61,25 @@ HTTP 200
 jsonpath "$.resourceType" == "Patient"
 jsonpath "$.id" == "{{pat_id}}"
 
+# Search a read-only type by _id — same graph check as the read above.
+GET {{gateway_url}}/fhir/Patient?_id={{pat_id}}
+Authorization: Bearer {{token}}
+Cache-Control: no-cache
+HTTP 200
+[Asserts]
+jsonpath "$.resourceType" == "Bundle"
+jsonpath "$.entry[0].resource.id" == "{{pat_id}}"
+
+# A second-level resource through the first-level search: the SR's requester
+# (PractitionerRole, in the graph) with its Practitioner.
+GET {{gateway_url}}/fhir/PractitionerRole?_id=prrole-e2e&_include=PractitionerRole:practitioner
+Authorization: Bearer {{token}}
+Cache-Control: no-cache
+HTTP 200
+[Asserts]
+jsonpath "$.entry[*].resource.resourceType" includes "PractitionerRole"
+jsonpath "$.entry[*].resource.resourceType" includes "Practitioner"
+
 # --- Negatives (gateway path) ------------------------------------------------
 
 # ServiceRequest search without _id → capability-guard 400.
@@ -95,7 +114,26 @@ HTTP 400
 [Asserts]
 jsonpath "$.issue[0].diagnostics" contains "unsupported _include:iterate value: ServiceRequest:subject"
 
+# Read-only search without _id → capability-guard 400.
+GET {{gateway_url}}/fhir/Patient
+Authorization: Bearer {{token}}
+HTTP 400
+[Asserts]
+jsonpath "$.issue[0].diagnostics" contains "missing required search parameter: _id"
+
+# An _include value that is not allowlisted → capability-guard 400.
+GET {{gateway_url}}/fhir/Patient?_id={{pat_id}}&_include=Patient:general-practitioner
+Authorization: Bearer {{token}}
+HTTP 400
+[Asserts]
+jsonpath "$.issue[0].diagnostics" contains "unsupported _include value: Patient:general-practitioner"
+
 # A resource that is NOT in the SR graph → OPA denies (403), end to end.
 GET {{gateway_url}}/fhir/Patient/not-in-graph
+Authorization: Bearer {{token}}
+HTTP 403
+
+# The same through search: an _id outside the graph is denied, not an empty Bundle.
+GET {{gateway_url}}/fhir/Patient?_id=not-in-graph
 Authorization: Bearer {{token}}
 HTTP 403
