@@ -1,11 +1,11 @@
 # =============================================================================
 # placer.hurl — this node acting AS THE PLACER: its gateway serves authorized
 # reads of a ServiceRequest and the resources in its graph, to a partner
-# (fulfiller) carrying a fhirContext token. Consent/fhirContext-gated (OPA Rule 4).
+# (fulfiller) carrying a context token. Consent- and context-gated (OPA Rule 4).
 #
 # {{token}} is minted by the runner (mock or real source) with
-#   scope: system/ServiceRequest.r system/Patient.r system/PractitionerRole.r
-#   fhirContext: ServiceRequest/{{sr_id}}
+#   scope: system/ServiceRequest.rs system/Patient.rs system/PractitionerRole.rs
+#   authorization_details: the context ServiceRequest/{{sr_id}}
 #   organization_reference: the org the seeded Consent names as actor.
 # Fixtures seeded by tests/scripts/seed.sh up. Consent-actor-mismatch and other
 # pure-policy denials live in the OPA unit tests (tests/opa/).

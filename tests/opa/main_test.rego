@@ -29,17 +29,15 @@ mock_ctx(req, _, _) := consent_ok if contains(req.url, "/Consent?data=")
 
 mock_ctx(req, path, body) := {"status_code": 200, "body": body} if contains(req.url, path)
 
-# A Task whose requester and owner are both org_a.
-mock_task_a(req) := {"status_code": 200, "body": {
-	"requester": {"reference": org_a},
-	"owner": {"reference": org_a},
-}} if contains(req.url, "/Task/")
+# A Task requested by org_a.
+mock_task_a(req) := {"status_code": 200, "body": {"requester": {"reference": org_a}}} if {
+	contains(req.url, "/Task/")
+}
 
-# A Task owned/requested by someone else (org_x).
-mock_task_x(req) := {"status_code": 200, "body": {
-	"requester": {"reference": org_x},
-	"owner": {"reference": org_x},
-}} if contains(req.url, "/Task/")
+# A Task requested by someone else (org_x).
+mock_task_x(req) := {"status_code": 200, "body": {"requester": {"reference": org_x}}} if {
+	contains(req.url, "/Task/")
+}
 
 # ServiceRequest context: active Consent naming org_a as actor, SR → Patient/p1.
 mock_sr_ok(req) := {"status_code": 200, "body": {"entry": [{"resource": {
@@ -188,15 +186,19 @@ req_in(method, rtype, rid, scope, org, ctx) := {
 	"resource_type": rtype,
 	"resource_id": rid,
 	"path": sprintf("/fhir/%s/%s", [rtype, rid]),
-	"token": {"organization_reference": org, "scope": scope, "fhir_context": ctx},
+	"read_action": "r",
+	"token": {"organization_reference": org, "scope": scope, "contexts": ctx},
 	"fhir_base": fhir_base,
 }
 
-# A Task search or read carrying _include values.
+# A Task search carrying _include values.
 task_include_in(rid, includes, ctx) := object.union(
 	req_in("GET", "Task", rid, "system/Task.rs", org_a, ctx),
-	{"includes": includes},
+	{"includes": includes, "read_action": "s"},
 )
+
+# A search by _id.
+search_in(rtype, rid, scope, ctx) := object.union(req_in("GET", rtype, rid, scope, org_a, ctx), {"read_action": "s"})
 
 # A Task create with the given body.
 create_in(body) := object.union(req_in("POST", "Task", "", "system/Task.c", org_a, []), {"body": body})
@@ -207,9 +209,9 @@ update_in(body) := object.union(req_in("PUT", "Task", "t1", "system/Task.u", org
 	"if_match": `W/"3"`,
 })
 
-sr_ctx := [{"reference": "ServiceRequest/sr1"}]
+sr_ctx := ["ServiceRequest/sr1"]
 
-task_ctx := [{"reference": "Task/t1"}]
+task_ctx := ["Task/t1"]
 
 # ============================================================================
 # Rule 1a — Task search
@@ -266,7 +268,7 @@ test_1b_output_include_denied_without_context if {
 }
 
 test_1b_output_include_denied_for_other_task_context if {
-	not data.umzh.authz.allow with input as task_include_in("t1", ["Task:output-value-reference"], [{"reference": "Task/t2"}])
+	not data.umzh.authz.allow with input as task_include_in("t1", ["Task:output-value-reference"], ["Task/t2"])
 		with http.send as mock_task_a
 }
 
@@ -276,19 +278,13 @@ test_1b_output_include_denied_for_other_task_context if {
 # ============================================================================
 
 # Task-fetch mock that ALSO requires the configured Authorization header.
-mock_task_a_auth(req) := {"status_code": 200, "body": {
-	"requester": {"reference": org_a},
-	"owner": {"reference": org_a},
-}} if {
+mock_task_a_auth(req) := {"status_code": 200, "body": {"requester": {"reference": org_a}}} if {
 	contains(req.url, "/Task/")
 	req.headers.Authorization == "Basic dGVzdDp0ZXN0"
 }
 
 # Task-fetch mock that requires NO Authorization header.
-mock_task_a_noauth(req) := {"status_code": 200, "body": {
-	"requester": {"reference": org_a},
-	"owner": {"reference": org_a},
-}} if {
+mock_task_a_noauth(req) := {"status_code": 200, "body": {"requester": {"reference": org_a}}} if {
 	contains(req.url, "/Task/")
 	not req.headers.Authorization
 }
@@ -531,7 +527,7 @@ test_4_denied_blank_id if {
 
 # The fetch would read the old, still active version.
 test_4_denied_versioned_context if {
-	not data.umzh.authz.allow with input as req_in("GET", "Patient", "p1", "system/Patient.r", org_a, [{"reference": "ServiceRequest/sr1/_history/1"}])
+	not data.umzh.authz.allow with input as req_in("GET", "Patient", "p1", "system/Patient.r", org_a, ["ServiceRequest/sr1/_history/1"])
 		with http.send as mock_sr_ok
 }
 
@@ -586,7 +582,7 @@ test_4b_denied_blank_id if {
 
 # The fetch would read an old version, with outputs since removed.
 test_4b_denied_versioned_context if {
-	not data.umzh.authz.allow with input as req_in("GET", "DocumentReference", "d1", "system/DocumentReference.r", org_a, [{"reference": "Task/t1/_history/1"}])
+	not data.umzh.authz.allow with input as req_in("GET", "DocumentReference", "d1", "system/DocumentReference.r", org_a, ["Task/t1/_history/1"])
 		with http.send as mock_task_ctx_ok
 }
 
@@ -600,7 +596,7 @@ test_4b_task_input_not_in_graph if {
 # Rule 5 — metadata (always)
 # ============================================================================
 test_5_metadata_allowed if {
-	data.umzh.authz.allow with input as {"method": "GET", "path": "/fhir/metadata", "resource_type": "", "resource_id": "", "token": {"organization_reference": "", "scope": "", "fhir_context": []}, "fhir_base": fhir_base}
+	data.umzh.authz.allow with input as {"method": "GET", "path": "/fhir/metadata", "resource_type": "", "resource_id": "", "token": {"organization_reference": "", "scope": "", "contexts": []}, "fhir_base": fhir_base}
 }
 
 # ============================================================================
@@ -635,4 +631,34 @@ test_uncontexted_read_denied if {
 
 test_uncontexted_directory_read_denied if {
 	not data.umzh.authz.allow with input as req_in("GET", "Organization", "o1", "system/Organization.r", org_a, [])
+}
+
+# ============================================================================
+# Cross-cutting — a token carries exactly one context
+# ============================================================================
+test_4_denied_with_two_contexts if {
+	not data.umzh.authz.allow with input as req_in("GET", "Patient", "p1", "system/Patient.r", org_a, ["ServiceRequest/sr1", "ServiceRequest/sr2"])
+		with http.send as mock_sr_ok
+}
+
+# ============================================================================
+# Cross-cutting — a search needs s
+# ============================================================================
+test_1b_search_denied_with_r_only if {
+	not data.umzh.authz.allow with input as search_in("Task", "t1", "system/Task.r", [])
+		with http.send as mock_task_a
+}
+
+test_3_search_denied_with_r_only if {
+	not data.umzh.authz.allow with input as search_in("Questionnaire", "", "system/Questionnaire.r", [])
+}
+
+test_4_search_denied_with_r_only if {
+	not data.umzh.authz.allow with input as search_in("Patient", "p1", "system/Patient.r", sr_ctx)
+		with http.send as mock_sr_ok
+}
+
+test_4b_search_denied_with_r_only if {
+	not data.umzh.authz.allow with input as search_in("DocumentReference", "d1", "system/DocumentReference.r", task_ctx)
+		with http.send as mock_task_ctx_ok
 }

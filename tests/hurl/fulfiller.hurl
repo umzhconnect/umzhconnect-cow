@@ -4,7 +4,7 @@
 # exercises; the runner's teardown sweeps them by identifier (urn:umzhc:test|e2e).
 #
 # {{token}} is minted by the runner with scope system/Task.{c,r,s,u} and
-# system/Questionnaire.r, and organization_reference = {{our_org}}, so it acts as
+# system/Questionnaire.rs, and organization_reference = {{our_org}}, so it acts as
 # the placer named in Task.requester. What the fulfiller does to its own Tasks
 # goes straight to {{proxy_url}}: those writes don't use the gateway.
 # =============================================================================
