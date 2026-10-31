@@ -54,8 +54,8 @@ docs {
   | Claim | Used for |
   |---|---|
   | `scope` | SMART scopes, space-delimited; combined letters are fine, e.g. `system/Task.crus` (= c+r+u+s) |
-  | `extensions.umzhconnect.organization_reference` | the caller's org — matched against the Consent actor and Task requester/owner |
-  | `fhirContext` | the ServiceRequest / Task graph(s) the caller is consented for |
+  | `extensions.umzhconnect.organization_reference` | the caller's org — matched against the Consent actor and Task requester |
+  | `fhirContext` | the ServiceRequest / Task graph(s) the caller is bound to |
 
   `iss` / `aud` / `exp` / `sub` are for the consumer's own **authentication** step,
   not OPA's decision. You pass **no** `fhir_base`, no scope, no org separately —

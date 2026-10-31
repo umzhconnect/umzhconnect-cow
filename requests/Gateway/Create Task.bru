@@ -27,11 +27,13 @@ body:json {
 script:post-response {
   if (res.body && res.body.id) {
     bru.setEnvVar("taskId", res.body.id);
+    bru.setEnvVar("taskVersion", res.body.meta.versionId);
   }
 }
 
 docs {
-  Create a Task (OPA Rule 1c: system/Task.c scope). requester/owner are set to
-  this party's own org (orgRef) so the later List and Patch requests match. The
-  new id is saved to {{taskId}}.
+  Create a Task (OPA Rule 1c: system/Task.c scope AND requester == your org).
+  requester/owner are set to this party's own org (orgRef) so the later List and
+  Update requests match. The new id and version are saved to {{taskId}} and
+  {{taskVersion}}.
 }

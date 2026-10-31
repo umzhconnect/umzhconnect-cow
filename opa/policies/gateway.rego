@@ -13,7 +13,8 @@ import rego.v1
 #       "method":  "GET",
 #       "path":    "/fhir/ServiceRequest",     # no query string
 #       "query":   {"_id": "ReferralOrthopedicSurgery"},
-#       "headers": {"authorization": "Bearer ..."}   # header name case-insensitive
+#       "headers": {"authorization": "Bearer ..."},  # header name case-insensitive
+#       "body":    "{\"resourceType\": \"Task\"}"     # POST/PUT: the raw body, a string
 #     }
 #   }
 # }
@@ -30,13 +31,15 @@ import rego.v1
 # JWKS) is a tracked improvement — see BACKLOG.md.
 # ---------------------------------------------------------------------------
 
-# The Authorization header value, looked up CASE-INSENSITIVELY: APISIX lowercases
-# header names, but other consumers (MuleSoft) may send "Authorization". Absent ⇒
-# jwt_payload stays unset ⇒ default-deny.
-_authorization := v if {
+# A header value, looked up CASE-INSENSITIVELY: APISIX lowercases header names, but
+# other consumers (MuleSoft) may send "Authorization".
+_header(name) := v if {
 	some k, v in input.request.headers
-	lower(k) == "authorization"
+	lower(k) == name
 }
+
+# Absent ⇒ jwt_payload stays unset ⇒ default-deny.
+_authorization := _header("authorization")
 
 # Decode (NOT verify — see the trust model above) the JWT from the bearer.
 jwt_payload := payload if {
@@ -118,6 +121,32 @@ _query_forwarded if resource_id != ""
 
 _query_forwarded if is_object(input.request.query)
 
+# POST names the type and PUT one resource, in the path: HAPI ignores If-Match on a
+# conditional PUT /Task?_id=<id>, and nothing below a resource is a write target.
+_valid_path if input.request.method == "GET"
+
+_valid_path if count(_path_parts) == {"POST": 1, "PUT": 2}[input.request.method]
+
+# The raw body of a write: a string, so nothing reformats it before main.rego compares
+# it. Absent or not JSON ⇒ {} ⇒ the write rules deny.
+default _body := {}
+
+_body := json.unmarshal(input.request.body)
+
+default _if_match := ""
+
+_if_match := _header("if-match")
+
+# Refused here, whatever main.rego decides.
+_well_formed if {
+	_valid_id
+	_valid_path
+	_query_forwarded
+
+	# conditionalCreate is false: HAPI would answer with the match, whoever owns it.
+	not _header("if-none-exist")
+}
+
 # ---------------------------------------------------------------------------
 # Delegate to main.rego with the mapped input shape
 # ---------------------------------------------------------------------------
@@ -134,22 +163,36 @@ _query_forwarded if is_object(input.request.query)
 default allow := false
 
 allow if {
-	_valid_id
-	_query_forwarded
+	_well_formed
 
 	# Evaluate existing policy with the input shape it expects.
-	data.umzh.authz.allow with input as {
-		"method":        input.request.method,
-		"path":          canonical_path,
-		"resource_type": resource_type,
-		"resource_id":   resource_id,
-		"includes":      includes,
-		"token": {
-			"organization_reference": object.get(object.get(object.get(jwt_payload, "extensions", {}), "umzhconnect", {}), "organization_reference", ""),
-			"scope":                  object.get(jwt_payload, "scope", ""),
-			"fhir_context":           object.get(jwt_payload, "fhirContext", []),
-		},
-		"fhir_base":          fhir_base,
-		"fhir_authorization": fhir_authorization,
-	}
+	data.umzh.authz.allow with input as _policy_input
+}
+
+# What a consumer answers instead of 403 when allow is false.
+default status_code := 403
+
+status_code := 412 if {
+	_well_formed
+	data.umzh.authz.task_version_mismatch with input as _policy_input
+}
+
+# What APISIX queries: the whole package also holds the bearer and the request body.
+decision := {"allow": allow, "status_code": status_code}
+
+_policy_input := {
+	"method":        input.request.method,
+	"path":          canonical_path,
+	"resource_type": resource_type,
+	"resource_id":   resource_id,
+	"includes":      includes,
+	"body":          _body,
+	"if_match":      _if_match,
+	"token": {
+		"organization_reference": object.get(object.get(object.get(jwt_payload, "extensions", {}), "umzhconnect", {}), "organization_reference", ""),
+		"scope":                  object.get(jwt_payload, "scope", ""),
+		"fhir_context":           object.get(jwt_payload, "fhirContext", []),
+	},
+	"fhir_base":          fhir_base,
+	"fhir_authorization": fhir_authorization,
 }

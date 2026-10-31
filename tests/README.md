@@ -71,7 +71,7 @@ skips the role scenarios.
 | `01-health.hurl` | none | gateway `/healthz` + `/jwks.json`, custodian, OPA |
 | `02-auth-negative.hurl` | none | gateway rejects missing / malformed / tampered bearer → `401` |
 | `placer.hurl` | token | **this node as placer** — no-bearer `401`; authorized `ServiceRequest` search + `_include` / allowlisted `_include:iterate` (requester `PractitionerRole` → `Practitioner`), read-by-id of the SR and a referenced `Patient` (OPA Rule 4); negatives: no `_id` → 400, non-allowlisted `_include:iterate` (incl. a value allowlisted only for plain `_include`) → 400, `_include:recurse` → 400, not-in-graph → 403 |
-| `fulfiller.hurl` | token | **this node as fulfiller** — no-bearer `401`; Task create (1c), list/read (1a/1b), patch a patchable field (1d); negatives: non-patchable field → 400, non-owned patch → 403 |
+| `fulfiller.hurl` | token | **this node as fulfiller** — no-bearer `401`; Task create (1c), list/read (1a/1b), cancel and answer by PUT (1d), Questionnaire search (3); negatives: stale `If-Match` → 412, `If-None-Exist`, unknown id → 403, PATCH → 404 |
 
 ### Auth source — mock or real
 
@@ -113,11 +113,11 @@ removes them afterward (an `EXIT` trap). `fulfiller.hurl` creates its own Tasks
 |-----|---------|---------|
 | `TOKEN_SOURCE` | `mock` | `mock` (issuer) or `real` (L2 flow) |
 | `GATEWAY_URL` | `http://localhost:9081` | external gateway |
-| `PROXY_URL` | `http://localhost:9091` | internal clinical-orders proxy (seeding) |
+| `PROXY_URL` | `http://localhost:9091` | internal clinical-orders proxy (seeding, the fulfiller's own Task writes) |
 | `CUSTODIAN_URL` | `http://localhost:9087` | key custodian |
 | `OPA_URL` | `http://localhost:9181` | OPA |
 | `MOCK_AUTH_URL` | `http://localhost:9099` | mock issuer `/token` |
 | `CLIENT_ID` | `fulfiller-client-l2` | L2 client id (`real` only) |
 | `CALLER_ORG` | `…/Organization/HospitalA` | placer: reading org = Consent actor |
-| `OUR_ORG` | `…/Organization/HospitalB` | fulfiller: Task owner |
+| `OUR_ORG` | `…/Organization/HospitalB` | fulfiller: Task requester |
 | `SR_ID` / `PAT_ID` | `sr-e2e` / `pat-e2e` | seeded fixture ids |

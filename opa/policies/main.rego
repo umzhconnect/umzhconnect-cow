@@ -7,7 +7,7 @@
 # The access token carries a `fhirContext` claim (SMART v2) derived from
 # RFC 9396 `authorization_details` (type "umzh-connect-context").  The Consent
 # is no longer named by the token; instead OPA locates it by searching
-# `Consent?data=<fhirContext-ref>&status=active` and verifies the actor.
+# `Consent?data=ServiceRequest/<id>&status=active` and verifies the actor.
 #
 # Two workflow-root types are supported (Rule 4 / Rule 4b):
 #
@@ -19,7 +19,8 @@
 #   5. Permit if the requested resource is in the graph
 #
 # Rule 4b — Task-rooted context (placer reading Task output from fulfiller):
-#   Same steps, but root is Task/<id>, no status check, and the graph walks
+#   The Task names the counter-party, so no Consent: the caller must be
+#   Task.requester.  No status check, and the graph walks
 #   Task.output[].valueReference
 # =============================================================================
 
@@ -38,6 +39,8 @@ default allow := false
 #   "resource_type": "Patient",
 #   "resource_id": "123",
 #   "includes": [],
+#   "body": {},
+#   "if_match": "",
 #   "token": {
 #     "organization_reference": "http://localhost:8084/fhir/Organization/HospitalF",
 #     "scope":                  "system/Patient.r system/Task.crus ...",
@@ -85,28 +88,29 @@ allow if {
 }
 
 # ==========================================================================
-# Rule 1c: Task create (POST) — scope check only. The caller creates a Task
-# owned by the partner (owner != caller), so ownership cannot be required here.
+# Rule 1c: Task create (POST) — the caller must be Task.requester, which rules
+# 1b, 1d and 4b trust.  No Task.output or businessStatus: only the Fulfiller sets
+# them, and rules 4b and 1d trust them too.  HAPI stores an object sent as _output
+# or _businessStatus in the plain field.
 # ==========================================================================
 allow if {
 	input.resource_type == "Task"
 	input.method == "POST"
 	has_smart_scope("Task", "c")
+	input.token.organization_reference != ""
+	input.body.requester.reference == input.token.organization_reference
+	count(object.keys(input.body) & {"output", "_output", "businessStatus", "_businessStatus"}) == 0
 }
 
 # ==========================================================================
-# Rule 1d: Task update (PATCH) — scope AND caller must be the Task owner.
-# PATCH is the only update method exposed on Task (PUT/DELETE have no route →
-# default-deny). The data consumer (requester) must NOT mutate the Task: Rule 4b
-# and the Task _include path derive read authorization from Task.output, which
-# the PATCH route can't change. Missing owner → fail-closed.
+# Rule 1d: Task update (PUT) — the caller must be Task.requester, If-Match must
+# name the version read here, and the change must be one the Placer may make.
+# HAPI gets the same If-Match, so the Task can't change between this check and
+# the write.  An unknown id fails the read, so PUT can't create a Task.
 # ==========================================================================
 allow if {
-	input.resource_type == "Task"
-	input.method == "PATCH"
-	has_smart_scope("Task", "u")
-	task := fetched_resource(requested_ref)
-	task.owner.reference == input.token.organization_reference
+	input.if_match == task_etag(updatable_task)
+	task_update_permitted(updatable_task, input.body)
 }
 
 # ==========================================================================
@@ -139,12 +143,6 @@ allow if {
 
 # ==========================================================================
 # Rule 4b: Allow read of resources within the fhirContext Task graph
-# ------------------------------------------------------------------------
-# Mirrors Rule 4 for Task-rooted contexts. The placer carries a context
-# token whose fhirContext root is Task/<id> and reads resources listed in
-# Task.output[].valueReference. Consent is looked up as
-# Consent?data=Task/<id>&status=active in this partition (the fulfiller's),
-# naming the placer as actor.
 # ==========================================================================
 allow if {
 	input.method == "GET"
@@ -152,7 +150,7 @@ allow if {
 	input.resource_id != ""
 	has_smart_scope(input.resource_type, "r")
 	some task_ref in fhir_context_task_refs
-	consent_grants(task_ref)
+	fetched_resource(task_ref).requester.reference == input.token.organization_reference
 	resource_in_task_graph(task_ref)
 }
 
@@ -188,8 +186,8 @@ fhir_context_task_refs contains ref if {
 # Task _include — what it pulls in is context-gated, the Task itself is not
 # ==========================================================================
 
-# Task:output-value-canonical is exempt for Questionnaires, but until POST rejects
-# output it can return whatever a caller put there.
+# Task:output-value-canonical is exempt: it lists Questionnaires, and only the
+# Fulfiller writes Task.output.
 task_include_needs_context if {
 	some value in input.includes
 	value != "Task:output-value-canonical"
@@ -197,9 +195,51 @@ task_include_needs_context if {
 
 task_include_permitted if not task_include_needs_context
 
-task_include_permitted if {
-	requested_ref in fhir_context_task_refs
-	consent_grants(requested_ref)
+task_include_permitted if requested_ref in fhir_context_task_refs
+
+# ==========================================================================
+# Task update — the IG's two changes a Placer may make
+# ==========================================================================
+
+updatable_task := task if {
+	input.resource_type == "Task"
+	input.method == "PUT"
+	has_smart_scope("Task", "u")
+	task := fetched_resource(requested_ref)
+	task.requester.reference == input.token.organization_reference
+}
+
+task_etag(task) := sprintf(`W/"%s"`, [task.meta.versionId])
+
+# A missing or stale If-Match: the adapter turns this denial into a 412.
+task_version_mismatch if input.if_match != task_etag(updatable_task)
+
+# The top-level fields that differ.  The IG leaves out meta, text and lastModified.
+task_changes(stored, submitted) := {field |
+	some field in (object.keys(stored) | object.keys(submitted))
+	not field in {"meta", "text", "lastModified"}
+	object.get(stored, field, null) != object.get(submitted, field, null)
+}
+
+# Cancel before work starts.  A statusReason may be added, not changed.
+task_update_permitted(stored, submitted) if {
+	stored.status in {"requested", "accepted"}
+	submitted.status == "cancelled"
+	task_changes(stored, submitted) - ({"statusReason"} - object.keys(stored)) == {"status"}
+}
+
+# Answer a request for information: add to Task.input and clear businessStatus.
+task_update_permitted(stored, submitted) if {
+	some coding in stored.businessStatus.coding
+	coding.code == "awaiting-information"
+	task_changes(stored, submitted) == {"input", "businessStatus"}
+	not submitted.businessStatus
+	is_array(submitted.input)
+	stored_input := object.get(stored, "input", [])
+	every entry in stored_input {
+		entry in submitted.input
+	}
+	count(submitted.input) > count(stored_input)
 }
 
 # ==========================================================================
@@ -328,7 +368,6 @@ resource_in_graph(sr_ref) if {
 # The set of resource references reachable from Task <task_ref>: the Task
 # itself plus everything its output[].valueReference fields point to.  Not
 # Task.input: the Placer fills it, so it must not decide what the Placer can read.
-# The same goes for Task.output on POST, until POST rejects it.
 task_graph(task_ref) := graph if {
 	task := fetched_resource(task_ref)
 	graph := (

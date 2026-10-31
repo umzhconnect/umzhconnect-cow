@@ -74,14 +74,14 @@ routes:
           - "PractitionerRole:practitioner"
       opa:
         host: "${{OPA_URL}}"
-        policy: "umzh/authz/gateway"
+        policy: "umzh/authz/gateway/decision"
       umzh-task-requester-inject: {}
     upstream:
       nodes:
         "clinical-orders-fhir:8080": 1
       type: roundrobin
 
-  # ─── Task create — JWT + OPA (Rule 1c: realm role + system/Task.c scope) ─
+  # ─── Task create — capability-guard (no params, forwards body) + OPA (Rule 1c) ─
   - id: ext-task-create
     uri: /fhir/Task
     methods: [POST]
@@ -95,18 +95,20 @@ routes:
         set_userinfo_header: false
         client_id: "unused"
         client_secret: "unused"
+      umzh-capability-guard:
+        forward_body: true
       opa:
         host: "${{OPA_URL}}"
-        policy: "umzh/authz/gateway"
+        policy: "umzh/authz/gateway/decision"
     upstream:
       nodes:
         "clinical-orders-fhir:8080": 1
       type: roundrobin
 
-  # ─── Task update — JWT + patchable-field guard (capability-guard) + OPA ─
+  # ─── Task update — capability-guard (no params, forwards body) + OPA (Rule 1d) ─
   - id: ext-task-update
     uri: /fhir/Task/*
-    methods: [PATCH]
+    methods: [PUT]
     priority: 10
     plugins:
       openid-connect:
@@ -118,10 +120,10 @@ routes:
         client_id: "unused"
         client_secret: "unused"
       umzh-capability-guard:
-        patchable_fields: ["input", "owner", "focus", "businessStatus"]
+        forward_body: true
       opa:
         host: "${{OPA_URL}}"
-        policy: "umzh/authz/gateway"
+        policy: "umzh/authz/gateway/decision"
     upstream:
       nodes:
         "clinical-orders-fhir:8080": 1
@@ -151,7 +153,7 @@ routes:
         allow_params: []
       opa:
         host: "${{OPA_URL}}"
-        policy: "umzh/authz/gateway"
+        policy: "umzh/authz/gateway/decision"
     upstream:
       nodes:
         "clinical-orders-fhir:8080": 1
@@ -188,7 +190,31 @@ routes:
           - "PractitionerRole:practitioner"
       opa:
         host: "${{OPA_URL}}"
-        policy: "umzh/authz/gateway"
+        policy: "umzh/authz/gateway/decision"
+    upstream:
+      nodes:
+        "clinical-orders-fhir:8080": 1
+      type: roundrobin
+
+  # ─── Questionnaire search — capability-guard + OPA (Rule 3) ─
+  - id: ext-questionnaire-search
+    uri: /fhir/Questionnaire
+    methods: [GET]
+    priority: 10
+    plugins:
+      openid-connect:
+        discovery: "${{AUTH_DISCOVERY_URL}}"
+        bearer_only: true
+        use_jwks: true
+        set_access_token_header: false
+        set_userinfo_header: false
+        client_id: "unused"
+        client_secret: "unused"
+      umzh-capability-guard:
+        allow_params: ["_id", "url"]
+      opa:
+        host: "${{OPA_URL}}"
+        policy: "umzh/authz/gateway/decision"
     upstream:
       nodes:
         "clinical-orders-fhir:8080": 1
@@ -235,7 +261,7 @@ routes:
           - "PractitionerRole:practitioner"
       opa:
         host: "${{OPA_URL}}"
-        policy: "umzh/authz/gateway"
+        policy: "umzh/authz/gateway/decision"
     upstream:
       nodes:
         "clinical-orders-fhir:8080": 1

@@ -26,7 +26,7 @@ rule without a scope is `/fhir/metadata` (the public CapabilityStatement).
 ## How a request flows
 
 ```
-PEP (APISIX gateway / MuleSoft) ── POST input.request {method, path, query, headers} ──▶ umzh/authz/gateway (gateway.rego)
+PEP (APISIX gateway / MuleSoft) ── POST input.request {method, path, query, headers, body} ──▶ umzh/authz/gateway (gateway.rego)
   gateway.rego: decode the (already-authenticated) bearer, parse the path, read
                fhir_base from data.config, then evaluate data.umzh.authz.allow
                with the mapped input ──▶ main.rego rules ──▶ allow = true/false
@@ -48,17 +48,17 @@ decision depends on.
 | Rule | Matches | Requires |
 |---|---|---|
 | **1a** | `GET /fhir/Task` (search) | `system/Task.s` **and** non-empty `organization_reference` (the gateway's injected `?requester=` filter scopes *what* is returned; this fails closed if the org ref is absent). Refuses a context-gated `_include` |
-| **1b** | `GET /fhir/Task/{id}`, `GET /fhir/Task?_id={id}` | `system/Task.r` **and** the fetched `Task.requester` == caller's `organization_reference`. A context-gated `_include` also needs a `Task/{id}` fhirContext entry and an active Consent for it |
-| **1c** | `POST /fhir/Task` (create) | `system/Task.c` — scope only (the Task is owned by the partner, so ownership can't be required) |
-| **1d** | `PATCH /fhir/Task/{id}` | `system/Task.u` **and** the fetched `Task.owner` == caller (owner-only writes keep the Task graph trustworthy) |
-| **3** | `GET /fhir/Questionnaire/{id}` | `system/Questionnaire.r` |
+| **1b** | `GET /fhir/Task/{id}`, `GET /fhir/Task?_id={id}` | `system/Task.r` **and** the fetched `Task.requester` == caller's `organization_reference`. A context-gated `_include` also needs a `Task/{id}` fhirContext entry |
+| **1c** | `POST /fhir/Task` (create) | `system/Task.c` **and** the body's `Task.requester` == caller **and** no `Task.output` or `businessStatus` |
+| **1d** | `PUT /fhir/Task/{id}` | `system/Task.u` **and** the fetched `Task.requester` == caller **and** `If-Match` names its current version (else `412`) **and** the body differs only by a cancel while `requested`/`accepted`, or an answer while `awaiting-information` (`input` added, `businessStatus` removed). `meta`, `text` and `lastModified` are not compared |
+| **3** | `GET /fhir/Questionnaire/{id}`, `GET /fhir/Questionnaire` | `system/Questionnaire.r` |
 | **4** | `GET` of any type except Task | `system/<Type>.r` **and** an active, non-expired **Consent** (actor == caller) for a **ServiceRequest** fhirContext entry **and** that SR is `active` **and** the resource is in its graph. A QuestionnaireResponse is also in the graph if its `basedOn` is the SR's relative reference |
-| **4b** | `GET` of any type except Task | `system/<Type>.r` **and** an active Consent for a **Task** fhirContext entry **and** the resource is in that Task's `output` graph |
+| **4b** | `GET` of any type except Task | `system/<Type>.r` **and** a **Task** fhirContext entry whose fetched `Task.requester` == caller **and** the resource is in that Task's `output` graph |
 | **5** | `GET /fhir/metadata` | nothing — public CapabilityStatement |
 
 Consent and ServiceRequest are re-read live on every request (not cached), so
 revocation, expiry and a ServiceRequest leaving `active` take effect immediately.
-Each fhirContext entry is paired with its **own** Consent — a Consent
+Each ServiceRequest fhirContext entry is paired with its **own** Consent — a Consent
 covering one context never grants access to another.
 
 ## Optional backend auth (OPA → FHIR server)
