@@ -9,8 +9,8 @@
 #   TOKEN_SOURCE=real
 #       Run the L2 private_key_jwt flow: custodian /sign → exchange at the auth
 #       server. scope + organization_reference come from the REGISTERED CLIENT
-#       (not from here); CONTEXT_REF is sent as RFC 9396 authorization_details so
-#       the issued token carries it as fhirContext.
+#       (not from here); CONTEXT_REF is sent as RFC 9396 authorization_details,
+#       which the issued token carries as a claim of the same name.
 #
 # Claims via env:
 #   SCOPE        e.g. "system/Task.c system/Task.u"   (mock only; real uses client defaults)
@@ -22,14 +22,15 @@ TOKEN_SOURCE="${TOKEN_SOURCE:-mock}"
 SCOPE="${SCOPE:-}"
 ORG_REF="${ORG_REF:-}"
 CONTEXT_REF="${CONTEXT_REF:-}"
+context="[{\"type\":\"http://fhir.ch/ig/ch-umzh-connect/context\",\"identifier\":\"${CONTEXT_REF}\"}]"
 
 extract_access_token() { sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p'; }
 
 if [ "$TOKEN_SOURCE" = "mock" ]; then
     MOCK_AUTH_URL="${MOCK_AUTH_URL:-http://localhost:9099}"
-    fc=""
-    [ -n "$CONTEXT_REF" ] && fc=",\"fhirContext\":[{\"reference\":\"${CONTEXT_REF}\"}]"
-    body="{\"scope\":\"${SCOPE}\",\"organization_reference\":\"${ORG_REF}\"${fc}}"
+    ad=""
+    [ -n "$CONTEXT_REF" ] && ad=",\"authorization_details\":${context}"
+    body="{\"scope\":\"${SCOPE}\",\"organization_reference\":\"${ORG_REF}\"${ad}}"
     curl -sf -X POST -H "Content-Type: application/json" -d "$body" \
         "${MOCK_AUTH_URL}/token" | extract_access_token
     exit 0
@@ -51,8 +52,7 @@ assertion=$(printf '%s' "$sign_resp" | sed -n 's/.*"assertion"[[:space:]]*:[[:sp
 body="grant_type=client_credentials&client_id=${CLIENT_ID}"
 body="${body}&client_assertion_type=${ASSERTION_TYPE}&client_assertion=${assertion}"
 if [ -n "$CONTEXT_REF" ]; then
-    ad="[{\"type\":\"umzh-connect-context\",\"identifier\":\"${CONTEXT_REF}\"}]"
-    ad_enc=$(printf '%s' "$ad" | sed 's/%/%25/g;s/ /%20/g;s/"/%22/g;s/{/%7B/g;s/}/%7D/g;s/\[/%5B/g;s/\]/%5D/g;s/:/%3A/g;s/,/%2C/g;s|/|%2F|g')
+    ad_enc=$(printf '%s' "$context" | sed 's/%/%25/g;s/ /%20/g;s/"/%22/g;s/{/%7B/g;s/}/%7D/g;s/\[/%5B/g;s/\]/%5D/g;s/:/%3A/g;s/,/%2C/g;s|/|%2F|g')
     body="${body}&authorization_details=${ad_enc}"
 fi
 

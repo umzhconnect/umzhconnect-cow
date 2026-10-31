@@ -1,5 +1,5 @@
 # =============================================================================
-# OPA — consent / fhirContext policy engine (namespace: opa).
+# OPA — consent / context policy engine (namespace: opa).
 #
 # The external gateway (clinical-orders namespace) calls this at
 # opa.opa.svc.cluster.local:8181 (its OPA_URL). OPA in turn reads the live

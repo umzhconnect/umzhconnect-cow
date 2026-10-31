@@ -1,7 +1,7 @@
 # =============================================================================
 # adapter_test.rego — unit tests for the APISIX request adapter in
 # opa/policies/gateway.rego (package umzh.authz.gateway): path/query → the
-# resource_type / resource_id / canonical_path it hands to main.rego.
+# resource_type / resource_id it hands to main.rego.
 # =============================================================================
 package umzh.authz.gateway_test
 
@@ -22,11 +22,7 @@ test_read_by_id_id if {
 	data.umzh.authz.gateway.resource_id == "123" with input as read_by_id
 }
 
-test_read_by_id_canonical if {
-	data.umzh.authz.gateway.canonical_path == "/fhir/Patient/123" with input as read_by_id
-}
-
-# Search with _id → id comes from the query, canonical_path folds it in.
+# Search with _id → id comes from the query.
 test_search_with_id_type if {
 	data.umzh.authz.gateway.resource_type == "ServiceRequest" with input as search_with_id
 }
@@ -35,15 +31,11 @@ test_search_with_id_id if {
 	data.umzh.authz.gateway.resource_id == "abc" with input as search_with_id
 }
 
-test_search_with_id_canonical if {
-	data.umzh.authz.gateway.canonical_path == "/fhir/ServiceRequest/abc" with input as search_with_id
-}
-
 # --- Decision is an EXPLICIT boolean (default allow := false) ----------------
 # A minimal alg:none JWT (io.jwt.decode doesn't verify) carrying a Task scope.
 _task_token := sprintf("%s.%s.sig", [
 	base64url.encode_no_pad(`{"alg":"none","typ":"JWT"}`),
-	base64url.encode_no_pad(`{"scope":"system/Task.crus","extensions":{"umzhconnect":{"organization_reference":"http://x/Organization/A"}},"fhirContext":[]}`),
+	base64url.encode_no_pad(`{"scope":"system/Task.crus","extensions":{"umzhconnect":{"organization_reference":"http://x/Organization/A"}}}`),
 ])
 
 # No bearer → denied → must be an explicit false (not undefined).
@@ -207,6 +199,30 @@ test_includes_keeps_non_string_value if {
 	data.umzh.authz.gateway.includes == [true] with input as _with_query({"_include": true})
 }
 
+# --- Token context and scope action ------------------------------------------
+# Entries of other types don't count: this token still has exactly one context.
+test_context_and_search_scope_reach_main if {
+	claims := {
+		"scope": "system/Task.s",
+		"extensions": {"umzhconnect": {"organization_reference": "http://x/Organization/A"}},
+		"authorization_details": [
+			{"type": "http://fhir.ch/ig/ch-umzh-connect/context", "identifier": "Task/t1"},
+			{"type": "umzh-connect-context", "identifier": "Task/t2"},
+		],
+	}
+	bearer := sprintf("Bearer %s.%s.sig", [base64url.encode_no_pad(`{"alg":"none","typ":"JWT"}`), base64url.encode_no_pad(json.marshal(claims))])
+	_real_decision({
+		"method": "GET", "path": "/fhir/Task",
+		"query": {"_id": "t1", "_include": "Task:output-value-reference"},
+		"headers": {"authorization": bearer},
+	}).allow == true
+}
+
+test_read_action if {
+	data.umzh.authz.gateway._read_action == "s" with input as search_with_id
+	data.umzh.authz.gateway._read_action == "r" with input as read_by_id
+}
+
 # --- fhir_base resolution: env override vs data document ---------------------
 # Default: no FHIR_BASE env → fhir_base comes from the opa-config.json data doc.
 test_fhir_base_from_data_config if {
@@ -226,15 +242,11 @@ test_fhir_base_empty_env_falls_back if {
 		with data.config as {"fhir_base": "http://cfg/fhir/clinical-orders"}
 }
 
-# Search with no id → empty resource_id, canonical_path is the raw path.
+# Search with no id → empty resource_id.
 test_search_no_id_type if {
 	data.umzh.authz.gateway.resource_type == "Task" with input as search_no_id
 }
 
 test_search_no_id_empty_id if {
 	data.umzh.authz.gateway.resource_id == "" with input as search_no_id
-}
-
-test_search_no_id_canonical if {
-	data.umzh.authz.gateway.canonical_path == "/fhir/Task" with input as search_no_id
 }

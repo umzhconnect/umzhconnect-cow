@@ -37,14 +37,14 @@ docs {
     "aud": "https://auth.umzhconnect.ch/realms/umzh-connect/protocol/openid-connect/token",
     "exp": 1730000000,
 
-    "scope": "system/Task.crus system/ServiceRequest.r system/Patient.r",
+    "scope": "system/Task.crus system/ServiceRequest.rs system/Patient.rs",
     "extensions": {
       "umzhconnect": {
         "organization_reference": "https://registry.umzhconnect.ch/fhir/Organization/HospitalB"
       }
     },
-    "fhirContext": [
-      { "reference": "ServiceRequest/sr-e2e" }
+    "authorization_details": [
+      { "type": "http://fhir.ch/ig/ch-umzh-connect/context", "identifier": "ServiceRequest/sr-e2e" }
     ]
   }
   ```
@@ -55,7 +55,7 @@ docs {
   |---|---|
   | `scope` | SMART scopes, space-delimited; combined letters are fine, e.g. `system/Task.crus` (= c+r+u+s) |
   | `extensions.umzhconnect.organization_reference` | the caller's org — matched against the Consent actor and Task requester |
-  | `fhirContext` | the ServiceRequest / Task graph(s) the caller is bound to |
+  | `authorization_details` | the one ServiceRequest / Task graph the caller is bound to |
 
   `iss` / `aud` / `exp` / `sub` are for the consumer's own **authentication** step,
   not OPA's decision. You pass **no** `fhir_base`, no scope, no org separately —
@@ -65,7 +65,7 @@ docs {
 
   Run the **Auth** folder (*Sign assertion* → *Exchange for token*) to mint one,
   then copy the resulting `accessToken` into the `bearerToken` env var — or paste
-  any token from your auth server. Its scope / org / fhirContext decide the
+  any token from your auth server. Its scope / org / context decide the
   outcome. The graph/consent requests (Task update, ServiceRequest search, read by
   id) also need the stack up + seeded data (`tests/scripts/seed.sh up`).
 }

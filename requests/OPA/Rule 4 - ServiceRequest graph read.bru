@@ -20,12 +20,11 @@ body:json {
       "resource_type": "Patient",
       "resource_id": "pat-e2e",
       "path": "/fhir/Patient/pat-e2e",
+      "read_action": "r",
       "token": {
         "organization_reference": "{{orgA}}",
         "scope": "system/Patient.r",
-        "fhir_context": [
-          { "reference": "ServiceRequest/sr-e2e" }
-        ]
+        "contexts": ["ServiceRequest/sr-e2e"]
       },
       "fhir_base": "{{opaFhirBase}}"
     }
@@ -33,7 +32,7 @@ body:json {
 }
 
 docs {
-  Rule 4 — read within a ServiceRequest fhirContext graph. Requires
+  Rule 4 — read within a ServiceRequest context graph. Requires
   system/<Type>.r AND an active, non-expired Consent (actor == caller) for the
   ServiceRequest context AND that ServiceRequest is active AND the requested
   resource is in its graph.

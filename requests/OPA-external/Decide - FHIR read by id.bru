@@ -29,8 +29,9 @@ body:json {
 }
 
 docs {
-  May this caller read Patient/pat-e2e? Allowed only if the resource is inside a
-  fhirContext graph the token is consented for (system/Patient.r + a Consent for the
-  ServiceRequest/Task context whose graph contains this Patient). DATA-DEPENDENT.
+  May this caller read Patient/pat-e2e? Allowed only if the resource is inside the
+  token's context graph (system/Patient.r + a Consent for a ServiceRequest context,
+  or the caller as requester of a Task context, whose graph contains this Patient).
+  DATA-DEPENDENT.
   Response: { "result": true|false }.
 }
