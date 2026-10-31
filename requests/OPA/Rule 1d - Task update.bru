@@ -1,0 +1,50 @@
+meta {
+  name: Rule 1d - Task update
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{opaUrl}}/v1/data/umzh/authz/allow
+  body: json
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "input": {
+      "method": "PUT",
+      "resource_type": "Task",
+      "resource_id": "task-e2e",
+      "path": "/fhir/Task/task-e2e",
+      "if_match": "W/\"1\"",
+      "body": {
+        "resourceType": "Task",
+        "id": "task-e2e",
+        "status": "cancelled",
+        "intent": "order",
+        "requester": { "reference": "{{orgA}}" }
+      },
+      "token": {
+        "organization_reference": "{{orgA}}",
+        "scope": "system/Task.u",
+        "fhir_context": []
+      },
+      "fhir_base": "{{opaFhirBase}}"
+    }
+  }
+}
+
+docs {
+  Rule 1d — Task update (PUT). Requires system/Task.u, the fetched Task's
+  requester == organization_reference, if_match == its current version, and a
+  change the Placer may make: a cancel while requested or accepted, or an answer
+  while awaiting-information.
+
+  DATA-DEPENDENT: OPA fetches fhir_base/Task/task-e2e. True only if that Task is at
+  version 1, requested by {{orgA}}, requested or accepted, and equals the body
+  apart from the status.
+}

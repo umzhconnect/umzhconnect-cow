@@ -1,8 +1,7 @@
 # =============================================================================
 # adapter_test.rego — unit tests for the APISIX request adapter in
 # opa/policies/gateway.rego (package umzh.authz.gateway): path/query → the
-# resource_type / resource_id / canonical_path it hands to main.rego. Pure (no
-# http.send), so no mocks needed.
+# resource_type / resource_id / canonical_path it hands to main.rego.
 # =============================================================================
 package umzh.authz.gateway_test
 
@@ -115,6 +114,72 @@ test_task_read_without_query_allowed if {
 
 test_post_without_query_allowed if {
 	_decide({"method": "POST", "path": "/fhir/Task", "headers": _bearer}) == true
+}
+
+test_if_none_exist_denied if {
+	every name in ["if-none-exist", "If-None-Exist"] {
+		_decide({"method": "POST", "path": "/fhir/Task", "headers": object.union(_bearer, {name: "_id=victim"})}) == false
+	}
+}
+
+test_write_on_wrong_path_denied if {
+	every request in [
+		{"method": "PUT", "path": "/fhir/Task/t1/_history/1"},
+		{"method": "POST", "path": "/fhir/Task/t1/_history/1"},
+		{"method": "POST", "path": "/fhir/Task/t1"},
+		{"method": "PUT", "path": "/fhir/Task", "query": {"_id": "t1"}},
+	] {
+		_decide(object.union(request, {"headers": _bearer})) == false
+	}
+}
+
+# --- Writes through the real main.rego ---------------------------------------
+_create(body) := {"method": "POST", "path": "/fhir/Task", "body": body, "headers": _bearer}
+
+_write(body, headers) := {"method": "PUT", "path": "/fhir/Task/t1", "body": body, "headers": object.union(_bearer, headers)}
+
+_created := `{"resourceType":"Task","requester":{"reference":"http://x/Organization/A"}}`
+
+_cancelled := `{"resourceType":"Task","status":"cancelled","requester":{"reference":"http://x/Organization/A"}}`
+
+_stored_task(_) := {"status_code": 200, "body": {
+	"resourceType": "Task",
+	"meta": {"versionId": "3"},
+	"status": "requested",
+	"requester": {"reference": "http://x/Organization/A"},
+}}
+
+_real_decision(request) := decision if {
+	decision := data.umzh.authz.gateway.decision with input as {"request": request}
+		with data.config as {"fhir_base": "http://hapi/fhir/clinical-orders"}
+		with http.send as _stored_task
+}
+
+test_create_decided_on_the_body if {
+	_real_decision(_create(_created)).allow == true
+}
+
+test_update_decided_on_body_and_version if {
+	_real_decision(_write(_cancelled, {"if-match": `W/"3"`})).allow == true
+}
+
+test_wrong_version_answers_412 if {
+	every headers in [{"if-match": `W/"2"`}, {}] {
+		_real_decision(_write(_cancelled, headers)) == {"allow": false, "status_code": 412}
+	}
+}
+
+test_refused_writes_keep_403 if {
+	every request in [
+		{"method": "POST", "path": "/fhir/Task", "headers": _bearer},
+		_write("<Task/>", {"if-match": `W/"3"`}),
+		_write(`{"status":"completed"}`, {"if-match": `W/"3"`}),
+		object.union(_write(_cancelled, {}), {"path": "/fhir/Task/t1/_history/1"}),
+		object.union(_write(_cancelled, {}), {"path": "/fhir/Task/t1#x"}),
+		_write(_cancelled, {"if-none-exist": "_id=x"}),
+	] {
+		_real_decision(request) == {"allow": false, "status_code": 403}
+	}
 }
 
 # --- _include values: a lone value is a string, repeated ones an array -------

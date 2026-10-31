@@ -33,7 +33,7 @@ MOCK_AUTH_URL="${MOCK_AUTH_URL:-http://localhost:9099}"
 PROXY_URL="${PROXY_URL:-http://localhost:9091}"
 TOKEN_SOURCE="${TOKEN_SOURCE:-mock}"
 # Test org identities. CALLER_ORG (the reading fulfiller in placer.hurl) MUST
-# match the Consent actor the seed writes; OUR_ORG is the Task owner in fulfiller.hurl.
+# match the Consent actor the seed writes; OUR_ORG is the Task requester in fulfiller.hurl.
 CALLER_ORG="${CALLER_ORG:-http://localhost:9084/fhir/Organization/HospitalA}"
 OUR_ORG="${OUR_ORG:-http://localhost:9084/fhir/Organization/HospitalB}"
 SR_ID="${SR_ID:-sr-e2e}"
@@ -79,7 +79,7 @@ if curl -sf --max-time 5 "$auth_probe" > /dev/null 2>&1; then
         CONTEXT_REF="ServiceRequest/${SR_ID}" sh "$SCRIPT_DIR/get-token.sh" || true)
     # Combined SMART v2 scope (one scope granting create/read/update/search on Task);
     # read scopes stay per-type. Combined and per-type both satisfy has_smart_scope.
-    FULFILLER_TOKEN=$(SCOPE="system/Task.crus" \
+    FULFILLER_TOKEN=$(SCOPE="system/Task.crus system/Questionnaire.r" \
         ORG_REF="${OUR_ORG}" sh "$SCRIPT_DIR/get-token.sh" || true)
 
     if [ -n "$PLACER_TOKEN" ]; then
@@ -94,7 +94,8 @@ if curl -sf --max-time 5 "$auth_probe" > /dev/null 2>&1; then
     if [ -n "$FULFILLER_TOKEN" ]; then
         run "${HURL_DIR}/fulfiller.hurl" \
             --variable "token=${FULFILLER_TOKEN}" \
-            --variable "our_org=${OUR_ORG}"
+            --variable "our_org=${OUR_ORG}" \
+            --variable "proxy_url=${PROXY_URL}"
     else
         echo "--- fulfiller.hurl: SKIPPED (could not mint token) ---"; fail=1
     fi

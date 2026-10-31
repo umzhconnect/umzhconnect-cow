@@ -10,7 +10,7 @@ environment, and go.
 - **Auth** — the two-step L2 token flow:
   1. *Sign assertion* → the key custodian mints a `private_key_jwt` (saved to `assertion`).
   2. *Exchange for token* → swap it at the auth server for an access token (saved to `accessToken`).
-- **Gateway** — authenticated FHIR: list / create / patch Task, search ServiceRequest.
+- **Gateway** — authenticated FHIR: list / create / update Task, search ServiceRequest.
   These read `{{accessToken}}`, so run the **Auth** folder first.
 - **OPA-external** — **the external decision contract** (how any external consumer
   — a gateway or integration platform such as MuleSoft — asks OPA for a decision).
@@ -39,9 +39,14 @@ token and injects the backend address itself.
   } } }
   ```
   Forward the request's `query` too, `{}` if it has none: OPA denies a Task search
-  without it.
+  without it. A Task write also sends `body`, the raw request body as a string, and
+  any `if-match` / `if-none-exist` header: OPA denies a write it can't read. Forward
+  the same `If-Match` and the identical body bytes to the FHIR server: the decision
+  only holds for those.
 - **Response:** `{ "result": true }` (allow) or `{ "result": false }` (deny).
-  Treat anything that is not `true` as **deny**.
+  Treat anything that is not `true` as **deny**. After a `false` on a Task update,
+  send the same body to `/v1/data/umzh/authz/gateway/status_code`: `{ "result": 412 }`
+  (missing or stale `If-Match`) replaces the 403.
 - **The consumer passes NO `fhir_base`, NO scope, NO org, NO context.** OPA decodes
   `scope` / `organization_reference` / `fhirContext` from the bearer, and injects
   `fhir_base` (which FHIR server to read Consent/Task from) from its **own trusted
@@ -76,19 +81,19 @@ Bruno), and it's a dev convenience only.
 ## Environment (`environments/Local.bru`)
 
 Points at the default host ports (gateway `:9081`, custodian `:9087`, OPA `:9181`,
-auth server `:8180`), the `orgA`/`orgB` test org identities, `opaFhirBase` (OPA's
+auth server `:8180`), the `orgA` test org identity, `opaFhirBase` (OPA's
 in-cluster FHIR address, used by the OPA-core folder only), `clientId:
 fulfiller-client-l2`, and `orgRef` set to the sandbox fulfiller org. Adjust these
 to your ecosystem — `clientId` must be a client the auth server knows whose
 `jwks.url` resolves to this node's `/jwks.json`, and `orgRef` must equal the
 token's `organization_reference`.
 
-`assertion`, `accessToken`, `taskId`, and `bearerToken` are secret vars — filled at
+`assertion`, `accessToken`, `taskId`, `taskVersion`, and `bearerToken` are secret vars — filled at
 runtime (or pasted) — leave them blank in the file.
 
 ## Typical flow
 
 Auth › *1 Sign assertion* → Auth › *2 Exchange for token* → Gateway › *Create
-Task* → *List Tasks* → *Patch Task*.
+Task* → *List Tasks* → *Update Task*.
 
 For an automated, assert-checked version of these calls, see `../tests`.

@@ -34,7 +34,8 @@ spec:
       http:
         paths:
           # Adapter decision entrypoint ONLY: POST /v1/data/umzh/authz/gateway/allow
-          # (request + bearer in → boolean out). Deliberately NOT the core
+          # (request + bearer in → boolean out), plus .../status_code for a denied
+          # Task update. Deliberately NOT the core
           # /v1/data/umzh/authz/allow (caller-controlled fhir_base) nor bare
           # /v1/data. Widen only if a consumer genuinely needs more.
           - pathType: Prefix

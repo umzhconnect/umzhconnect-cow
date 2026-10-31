@@ -1,0 +1,42 @@
+meta {
+  name: Decide - Task update
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{opaUrl}}/v1/data/umzh/authz/gateway/allow
+  body: json
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "input": {
+      "request": {
+        "method": "PUT",
+        "path": "/fhir/Task/task-e2e",
+        "query": {},
+        "headers": {
+          "authorization": "Bearer {{bearerToken}}",
+          "if-match": "W/\"1\""
+        },
+        "body": "{\"resourceType\":\"Task\",\"id\":\"task-e2e\",\"status\":\"cancelled\",\"intent\":\"order\",\"requester\":{\"reference\":\"{{orgRef}}\"}}"
+      }
+    }
+  }
+}
+
+docs {
+  May this caller PUT Task/task-e2e? Requires system/Task.u AND — this is
+  DATA-DEPENDENT — the stored Task's requester must equal the token's org, if-match
+  its current version, and the body may differ only by a change the Placer may
+  make. OPA fetches the Task itself (from its configured fhir_base), so this needs
+  the stack up + the Task present. Response: { "result": true|false }.
+
+  After a false, send the same body to .../gateway/status_code: { "result": 412 }
+  means a missing or stale if-match.
+}
