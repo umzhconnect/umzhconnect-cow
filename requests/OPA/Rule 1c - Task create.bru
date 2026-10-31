@@ -20,6 +20,10 @@ body:json {
       "resource_type": "Task",
       "resource_id": "",
       "path": "/fhir/Task",
+      "body": {
+        "resourceType": "Task",
+        "requester": { "reference": "{{orgA}}" }
+      },
       "token": {
         "organization_reference": "{{orgA}}",
         "scope": "system/Task.c",
@@ -31,7 +35,7 @@ body:json {
 }
 
 docs {
-  Rule 1c — Task create (POST). Scope check only (system/Task.c): the caller
-  creates a Task OWNED by the partner, so ownership can't be required here. No
-  HAPI fetch. Expect { "result": true }.
+  Rule 1c — Task create (POST). Requires system/Task.c, Task.requester ==
+  organization_reference and no Task.output or businessStatus. No HAPI fetch.
+  Expect { "result": true }.
 }

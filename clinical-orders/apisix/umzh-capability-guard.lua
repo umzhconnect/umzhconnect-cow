@@ -28,6 +28,10 @@
 -- exact status code is intentionally simple here and may be revisited.
 
 local core = require("apisix.core")
+local opa_helper = require("apisix.plugins.opa.helper")
+
+-- A FHIR Task is far smaller; a larger body stays unread and OPA denies the write.
+local MAX_BODY_BYTES = 1048576
 
 local schema = {
   type = "object",
@@ -44,10 +48,8 @@ local schema = {
     -- is NOT thereby permitted to iterate, and vice versa. Empty ⇒ every
     -- `_include:iterate` is rejected.
     allow_include_iterates = { type = "array", items = { type = "string" }, default = {} },
-    -- FHIR JSON-Patch field allowlist (PATCH routes): every op's `path` (and
-    -- `from`, for move/copy) must address one of these top-level elements.
-    -- Empty ⇒ not enforced (non-PATCH routes leave this unset).
-    patchable_fields = { type = "array", items = { type = "string" }, default = {} },
+    -- Send the raw request body to OPA on this route.
+    forward_body   = { type = "boolean", default = false },
   },
   -- Reject unknown keys at config-load time. Without this a typo fails open in
   -- one case: misspelling `require` (e.g. `requires`) would silently drop the
@@ -66,6 +68,16 @@ local _M = {
 
 function _M.check_schema(conf)
   return core.schema.check(schema, conf)
+end
+
+-- The stock opa plugin builds its input here and has no option for the body. If an
+-- upgrade stops calling this, OPA gets no body and denies every write.
+local build_opa_input = opa_helper.build_opa_input
+
+function opa_helper.build_opa_input(conf, ctx, subsystem)
+  local data = build_opa_input(conf, ctx, subsystem)
+  data.input.request.body = ctx.umzh_request_body
+  return data
 end
 
 local function to_set(arr)
@@ -150,29 +162,13 @@ function _M.access(conf, ctx)
     end
   end
 
-  -- PATCH body field allowlist (FHIR JSON-Patch). Only enforced when configured
-  -- AND the request is a PATCH, so the body check never applies to GET/POST/etc.
-  if conf.patchable_fields and #conf.patchable_fields > 0 and ngx.req.get_method() == "PATCH" then
-    local allow_fields = to_set(conf.patchable_fields)
-    ngx.req.read_body()
-    local raw = ngx.req.get_body_data()
-    local ops = raw and core.json.decode(raw)
-    if type(ops) ~= "table" or ops[1] == nil then
-      return reject("invalid", "PATCH body must be a non-empty JSON-Patch array")
+  if conf.forward_body then
+    -- OPA sees the first 100 headers only, and HAPI would act on a later one.
+    local _, headers_err = ngx.req.get_headers(100)
+    if headers_err == "truncated" then
+      return reject("invalid", "too many request headers")
     end
-    for _, op in ipairs(ops) do
-      if type(op.path) ~= "string" then
-        return reject("invalid", "JSON-Patch op missing path")
-      end
-      local targets = { op.path }
-      if op.from ~= nil then targets[#targets + 1] = op.from end
-      for _, p in ipairs(targets) do
-        local root = type(p) == "string" and p:match("^/([^/]+)")
-        if not root or not allow_fields[root] then
-          return reject("not-supported", "field not patchable: " .. tostring(p))
-        end
-      end
-    end
+    ctx.umzh_request_body = core.request.get_body(MAX_BODY_BYTES, ctx)
   end
 end
 
