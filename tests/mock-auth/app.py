@@ -17,13 +17,14 @@ POST /token body (all optional):
     {
       "scope": "system/Task.c system/Task.u",
       "organization_reference": "https://registry.example/Organization/Hosp",
-      "fhirContext": [{"reference": "ServiceRequest/sr-e2e"}],
+      "authorization_details": [{"type": "http://fhir.ch/ig/ch-umzh-connect/context",
+                                 "identifier": "ServiceRequest/sr-e2e"}],
       "sub": "test-client",
       "ttl": 300
     }
 
 The claims are shaped exactly how apisix.rego reads them: `scope` (string),
-`extensions.umzhconnect.organization_reference`, and `fhirContext` (array).
+`extensions.umzhconnect.organization_reference`, and `authorization_details` (array).
 
 NEVER run this outside tests — it signs any claims you ask for.
 """
@@ -133,8 +134,8 @@ def token():
             }
         },
     }
-    if body.get("fhirContext") is not None:
-        claims["fhirContext"] = body["fhirContext"]
+    if body.get("authorization_details") is not None:
+        claims["authorization_details"] = body["authorization_details"]
 
     access_token = pyjwt.encode(
         claims, PRIVATE_PEM, algorithm="RS256", headers={"kid": KID, "typ": "JWT"}

@@ -48,7 +48,7 @@ token and injects the backend address itself.
   send the same body to `/v1/data/umzh/authz/gateway/status_code`: `{ "result": 412 }`
   (missing or stale `If-Match`) replaces the 403.
 - **The consumer passes NO `fhir_base`, NO scope, NO org, NO context.** OPA decodes
-  `scope` / `organization_reference` / `fhirContext` from the bearer, and injects
+  `scope` / `organization_reference` / `authorization_details` from the bearer, and injects
   `fhir_base` (which FHIR server to read Consent/Task from) from its **own trusted
   config**. This is deliberate and security-critical: if a caller could set
   `fhir_base`, it could point OPA at a rogue FHIR server serving fake Consents and
@@ -57,7 +57,7 @@ token and injects the backend address itself.
 - **Token (`bearerToken`):** the client's access token that the consumer is
   forwarding. For testing, mint one via the **Auth** folder and copy `accessToken`
   into `bearerToken`, or paste any token from your auth server. Its
-  scope/org/fhirContext decide the outcome (OPA does **not** verify the signature,
+  scope/org/context decide the outcome (OPA does **not** verify the signature,
   but it must carry the right claims). The `Decide - …` requests mirror the
   gateway's real routes (Task search/create/update, ServiceRequest search, read by
   id); the graph/consent ones (Task update, SR search, read by id) are

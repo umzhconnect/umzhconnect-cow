@@ -6,7 +6,7 @@
 --                    (a type with no route → 404, APISIX default-deny).
 --   * THIS plugin  → which query params / _include values are permitted on a
 --                    route that IS reachable.
---   * OPA          → consent / fhirContext-graph / _id-in-context authorization.
+--   * OPA          → consent / context-graph / _id-in-context authorization.
 --
 -- A request passes only if EVERY query key is explicitly permitted, after
 -- normalizing for FHIR parameter syntax:

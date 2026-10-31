@@ -85,14 +85,6 @@ resource_id := id if {
 	id != ""
 } else := ""
 
-canonical_path := concat("/", ["/fhir", resource_type, resource_id]) if {
-	resource_id != ""
-}
-
-canonical_path := input.request.path if {
-	resource_id == ""
-}
-
 # Every _include value, whatever the modifier. APISIX sends a lone value as a
 # string and repeated ones as an array.
 _as_array(v) := v if is_array(v)
@@ -137,6 +129,17 @@ default _if_match := ""
 
 _if_match := _header("if-match")
 
+# A search needs the s scope, a read the r scope.
+default _read_action := "r"
+
+_read_action := "s" if count(_path_parts) == 1
+
+# The token's contexts. Entries of other types are ignored.
+_contexts := [entry.identifier |
+	some entry in object.get(jwt_payload, "authorization_details", [])
+	entry.type == "http://fhir.ch/ig/ch-umzh-connect/context"
+]
+
 # Refused here, whatever main.rego decides.
 _well_formed if {
 	_valid_id
@@ -151,7 +154,7 @@ _well_formed if {
 # Delegate to main.rego with the mapped input shape
 # ---------------------------------------------------------------------------
 # Authorization is SMART-scope + context (organization_reference / consent /
-# fhirContext) centric — every rule in main.rego carries its own scope and
+# context graph) centric — every rule in main.rego carries its own scope and
 # identity conditions, so there is no coarse realm-role gate here.
 #
 # `default allow := false` makes the decision an EXPLICIT boolean: a denied query
@@ -182,16 +185,17 @@ decision := {"allow": allow, "status_code": status_code}
 
 _policy_input := {
 	"method":        input.request.method,
-	"path":          canonical_path,
+	"path":          input.request.path,
 	"resource_type": resource_type,
 	"resource_id":   resource_id,
 	"includes":      includes,
 	"body":          _body,
 	"if_match":      _if_match,
+	"read_action":   _read_action,
 	"token": {
 		"organization_reference": object.get(object.get(object.get(jwt_payload, "extensions", {}), "umzhconnect", {}), "organization_reference", ""),
 		"scope":                  object.get(jwt_payload, "scope", ""),
-		"fhir_context":           object.get(jwt_payload, "fhirContext", []),
+		"contexts":               _contexts,
 	},
 	"fhir_base":          fhir_base,
 	"fhir_authorization": fhir_authorization,
