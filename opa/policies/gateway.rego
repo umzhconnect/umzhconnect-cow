@@ -178,7 +178,9 @@ status_code := 412 if {
 }
 
 # What APISIX queries: the whole package also holds the bearer and the request body.
-decision := {"allow": allow, "status_code": status_code}
+decision := {"allow": true} if allow
+
+decision := {"allow": false, "status_code": status_code} if not allow
 
 _policy_input := {
 	"method":        input.request.method,

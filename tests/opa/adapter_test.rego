@@ -156,11 +156,11 @@ _real_decision(request) := decision if {
 }
 
 test_create_decided_on_the_body if {
-	_real_decision(_create(_created)).allow == true
+	_real_decision(_create(_created)) == {"allow": true}
 }
 
 test_update_decided_on_body_and_version if {
-	_real_decision(_write(_cancelled, {"if-match": `W/"3"`})).allow == true
+	_real_decision(_write(_cancelled, {"if-match": `W/"3"`})) == {"allow": true}
 }
 
 test_wrong_version_answers_412 if {
