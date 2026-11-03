@@ -47,20 +47,18 @@ decision depends on.
 
 | Rule | Matches | Requires |
 |---|---|---|
-| **1a** | `GET /fhir/Task` (search) | `system/Task.s` **and** non-empty `organization_reference` (the gateway's injected `?requester=` filter scopes *what* is returned; this fails closed if the org ref is absent) |
-| **1b** | `GET /fhir/Task/{id}` | `system/Task.r` **and** the fetched `Task.requester` == caller's `organization_reference` |
+| **1a** | `GET /fhir/Task` (search) | `system/Task.s` **and** non-empty `organization_reference` (the gateway's injected `?requester=` filter scopes *what* is returned; this fails closed if the org ref is absent). Refuses a context-gated `_include` |
+| **1b** | `GET /fhir/Task/{id}`, `GET /fhir/Task?_id={id}` | `system/Task.r` **and** the fetched `Task.requester` == caller's `organization_reference`. A context-gated `_include` also needs a `Task/{id}` fhirContext entry and an active Consent for it |
 | **1c** | `POST /fhir/Task` (create) | `system/Task.c` — scope only (the Task is owned by the partner, so ownership can't be required) |
 | **1d** | `PATCH /fhir/Task/{id}` | `system/Task.u` **and** the fetched `Task.owner` == caller (owner-only writes keep the Task graph trustworthy) |
-| **2** | any `QuestionnaireResponse` op | `system/QuestionnaireResponse.<action>` — no consent needed |
 | **3** | `GET /fhir/Questionnaire/{id}` | `system/Questionnaire.r` |
-| **4** | `GET` of any type except Task/QuestionnaireResponse | `system/<Type>.r` **and** an active, non-expired **Consent** (actor == caller) for a **ServiceRequest** fhirContext entry **and** the resource is in that SR's graph |
+| **4** | `GET` of any type except Task | `system/<Type>.r` **and** an active, non-expired **Consent** (actor == caller) for a **ServiceRequest** fhirContext entry **and** that SR is `active` **and** the resource is in its graph. A QuestionnaireResponse is also in the graph if its `basedOn` is the SR's relative reference |
 | **4b** | `GET` of any type except Task | `system/<Type>.r` **and** an active Consent for a **Task** fhirContext entry **and** the resource is in that Task's `output` graph |
 | **5** | `GET /fhir/metadata` | nothing — public CapabilityStatement |
-| **6** | `GET` on `Organization` / `Practitioner` / `PractitionerRole` | `system/<Type>.r` — directory reads |
 
-Consent is re-read live on every request (not cached) so revocation and expiry
-take effect immediately; the ServiceRequest fetch is cached (immutable for the
-workflow). Each fhirContext entry is paired with its **own** Consent — a Consent
+Consent and ServiceRequest are re-read live on every request (not cached), so
+revocation, expiry and a ServiceRequest leaving `active` take effect immediately.
+Each fhirContext entry is paired with its **own** Consent — a Consent
 covering one context never grants access to another.
 
 ## Optional backend auth (OPA → FHIR server)
@@ -140,7 +138,7 @@ forwards the request it is proxying + the client's bearer; it passes **no**
 
 ```
 POST https://opa.dev.umzhc.io.usz.ch/v1/data/umzh/authz/gateway/allow
-  { "input": { "request": { "method": "...", "path": "/fhir/...",
+  { "input": { "request": { "method": "...", "path": "/fhir/...", "query": { },
                             "headers": { "authorization": "Bearer <token>" } } } }
   # → { "result": true | false }
 ```
@@ -177,7 +175,7 @@ Two test files under `tests/opa/`:
 
 | File | Package | Covers |
 |---|---|---|
-| `main_test.rego` | `umzh.authz_test` | every rule 1a–6 and its branches (scope present/absent, org match/mismatch, consent active/expired/missing, resource in/out of graph), plus the optional backend-auth header (attached when set, absent when unset) |
+| `main_test.rego` | `umzh.authz_test` | every rule and its branches (scope present/absent, org match/mismatch, consent active/expired/missing, resource in/out of graph), plus the optional backend-auth header (attached when set, absent when unset) |
 | `adapter_test.rego` | `umzh.authz.gateway_test` | `gateway.rego`'s path/query parsing (`resource_type`, `resource_id`, `canonical_path`) for read-by-id vs. search shapes |
 
 **How the mocking works.** `main_test.rego` defines an input builder `req_in(method,

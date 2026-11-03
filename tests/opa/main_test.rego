@@ -15,7 +15,19 @@ fhir_base := "http://hapi/fhir/clinical-orders"
 org_a := "https://reg.example/Organization/A"
 org_x := "https://reg.example/Organization/X"
 
+active_sr := {"status": "active", "subject": {"reference": "Patient/p1"}}
+
+consent_ok := {"status_code": 200, "body": {"entry": [{"resource": {
+	"status": "active",
+	"provision": {"actor": [{"reference": {"reference": org_a}}]},
+}}]}}
+
 # --- http.send mocks (branch on the request URL) -----------------------------
+
+# A valid Consent, plus <body> for any URL containing <path>.
+mock_ctx(req, _, _) := consent_ok if contains(req.url, "/Consent?data=")
+
+mock_ctx(req, path, body) := {"status_code": 200, "body": body} if contains(req.url, path)
 
 # A Task whose requester and owner are both org_a.
 mock_task_a(req) := {"status_code": 200, "body": {
@@ -35,7 +47,7 @@ mock_sr_ok(req) := {"status_code": 200, "body": {"entry": [{"resource": {
 	"provision": {"actor": [{"reference": {"reference": org_a}}]},
 }}]}} if contains(req.url, "/Consent?data=")
 
-mock_sr_ok(req) := {"status_code": 200, "body": {"subject": {"reference": "Patient/p1"}}} if {
+mock_sr_ok(req) := {"status_code": 200, "body": active_sr} if {
 	contains(req.url, "/ServiceRequest/")
 }
 
@@ -45,7 +57,7 @@ mock_sr_wrong_actor(req) := {"status_code": 200, "body": {"entry": [{"resource":
 	"provision": {"actor": [{"reference": {"reference": org_x}}]},
 }}]}} if contains(req.url, "/Consent?data=")
 
-mock_sr_wrong_actor(req) := {"status_code": 200, "body": {"subject": {"reference": "Patient/p1"}}} if {
+mock_sr_wrong_actor(req) := {"status_code": 200, "body": active_sr} if {
 	contains(req.url, "/ServiceRequest/")
 }
 
@@ -58,16 +70,19 @@ mock_sr_expired(req) := {"status_code": 200, "body": {"entry": [{"resource": {
 	},
 }}]}} if contains(req.url, "/Consent?data=")
 
-mock_sr_expired(req) := {"status_code": 200, "body": {"subject": {"reference": "Patient/p1"}}} if {
+mock_sr_expired(req) := {"status_code": 200, "body": active_sr} if {
 	contains(req.url, "/ServiceRequest/")
 }
 
 # No Consent found for the context.
 mock_sr_no_consent(req) := {"status_code": 200, "body": {"entry": []}} if contains(req.url, "/Consent?data=")
 
-mock_sr_no_consent(req) := {"status_code": 200, "body": {"subject": {"reference": "Patient/p1"}}} if {
+mock_sr_no_consent(req) := {"status_code": 200, "body": active_sr} if {
 	contains(req.url, "/ServiceRequest/")
 }
+
+# Valid Consent, but the ServiceRequest was revoked.
+mock_sr_revoked(req) := mock_ctx(req, "/ServiceRequest/", object.union(active_sr, {"status": "revoked"}))
 
 # Task context: active Consent (actor org_a) + a Task whose output references DocumentReference/d1.
 mock_task_ctx_ok(req) := {"status_code": 200, "body": {"entry": [{"resource": {
@@ -79,6 +94,53 @@ mock_task_ctx_ok(req) := {"status_code": 200, "body": {"output": [{"valueReferen
 	contains(req.url, "/Task/")
 }
 
+# Contexts whose graph holds a reference ending in Patient/, which a blank _id would match.
+mock_sr_blank_ref(req) := mock_ctx(req, "/ServiceRequest/", {"status": "active", "subject": {"reference": "Patient/"}})
+
+mock_task_blank_ref(req) := mock_ctx(req, "/Task/", {"output": [{"valueReference": {"reference": "Patient/"}}]})
+
+# Task context whose Task lists Patient/p9 in input only: Task.input is not in the graph.
+mock_task_ctx_input(req) := mock_ctx(req, "/Task/", {
+	"requester": {"reference": org_a},
+	"input": [{"valueReference": {"reference": "Patient/p9"}}],
+})
+
+# Task requested by org_a, with and without a Consent for its context.
+mock_task_include_ok(req) := mock_ctx(req, "/Task/", {"requester": {"reference": org_a}})
+
+mock_task_include_no_consent(req) := {"status_code": 200, "body": {"entry": []}} if contains(req.url, "/Consent?data=")
+
+mock_task_include_no_consent(req) := {"status_code": 200, "body": {"requester": {"reference": org_a}}} if {
+	contains(req.url, "/Task/")
+}
+
+# ServiceRequest context + a QuestionnaireResponse with the given basedOn.
+mock_qr(req, _) := consent_ok if contains(req.url, "/Consent?data=")
+
+mock_qr(req, _) := {"status_code": 200, "body": active_sr} if {
+	contains(req.url, "/ServiceRequest/")
+}
+
+mock_qr(req, based_on) := {"status_code": 200, "body": {"basedOn": [{"reference": based_on}]}} if {
+	contains(req.url, "/QuestionnaireResponse/")
+}
+
+mock_qr_relative(req) := mock_qr(req, "ServiceRequest/sr1")
+
+mock_qr_other_root(req) := mock_qr(req, "ServiceRequest/sr2")
+
+mock_qr_other_server(req) := mock_qr(req, "https://other.example/fhir/ServiceRequest/sr1")
+
+# The QuestionnaireResponse is listed in supportingInfo and has no basedOn.
+mock_qr_forward(req) := consent_ok if contains(req.url, "/Consent?data=")
+
+mock_qr_forward(req) := {"status_code": 200, "body": {
+	"status": "active",
+	"supportingInfo": [{"reference": "QuestionnaireResponse/qr1"}],
+}} if contains(req.url, "/ServiceRequest/")
+
+mock_qr_forward(req) := {"status_code": 200, "body": {}} if contains(req.url, "/QuestionnaireResponse/")
+
 # --- input builders ----------------------------------------------------------
 
 req_in(method, rtype, rid, scope, org, ctx) := {
@@ -89,6 +151,12 @@ req_in(method, rtype, rid, scope, org, ctx) := {
 	"token": {"organization_reference": org, "scope": scope, "fhir_context": ctx},
 	"fhir_base": fhir_base,
 }
+
+# A Task search or read carrying _include values.
+task_include_in(rid, includes, ctx) := object.union(
+	req_in("GET", "Task", rid, "system/Task.rs", org_a, ctx),
+	{"includes": includes},
+)
 
 sr_ctx := [{"reference": "ServiceRequest/sr1"}]
 
@@ -109,6 +177,21 @@ test_1a_denied_empty_org if {
 	not data.umzh.authz.allow with input as req_in("GET", "Task", "", "system/Task.s", "", [])
 }
 
+# Questionnaires are not context-gated, so this _include needs no _id or context.
+test_1a_canonical_include_allowed if {
+	data.umzh.authz.allow with input as task_include_in("", ["Task:output-value-canonical"], [])
+}
+
+# Without _id there is no Task to bind a context to, even if the token has one.
+test_1a_output_include_denied if {
+	not data.umzh.authz.allow with input as task_include_in("", ["Task:output-value-reference"], task_ctx)
+		with http.send as mock_task_include_ok
+}
+
+test_1a_denied_when_any_include_needs_context if {
+	not data.umzh.authz.allow with input as task_include_in("", ["Task:output-value-canonical", "Task:output-value-reference"], [])
+}
+
 # ============================================================================
 # Rule 1b — Task read by id (requester must equal caller)
 # ============================================================================
@@ -120,6 +203,27 @@ test_1b_read_allowed_requester_match if {
 test_1b_denied_requester_mismatch if {
 	not data.umzh.authz.allow with input as req_in("GET", "Task", "t1", "system/Task.r", org_a, [])
 		with http.send as mock_task_x
+}
+
+# GET /Task?_id=t1 with an _include — context-gated results need Task/t1 + Consent.
+test_1b_output_include_allowed_with_context if {
+	data.umzh.authz.allow with input as task_include_in("t1", ["Task:output-value-reference"], task_ctx)
+		with http.send as mock_task_include_ok
+}
+
+test_1b_output_include_denied_without_context if {
+	not data.umzh.authz.allow with input as task_include_in("t1", ["Task:output-value-reference"], [])
+		with http.send as mock_task_include_ok
+}
+
+test_1b_output_include_denied_for_other_task_context if {
+	not data.umzh.authz.allow with input as task_include_in("t1", ["Task:output-value-reference"], [{"reference": "Task/t2"}])
+		with http.send as mock_task_include_ok
+}
+
+test_1b_output_include_denied_without_consent if {
+	not data.umzh.authz.allow with input as task_include_in("t1", ["Task:output-value-reference"], task_ctx)
+		with http.send as mock_task_include_no_consent
 }
 
 # ============================================================================
@@ -183,12 +287,8 @@ test_1d_denied_owner_mismatch if {
 }
 
 # ============================================================================
-# Rule 2 / 3 — Questionnaire[Response]
+# Rule 3 — Questionnaire
 # ============================================================================
-test_2_questionnaire_response_create if {
-	data.umzh.authz.allow with input as req_in("POST", "QuestionnaireResponse", "", "system/QuestionnaireResponse.c", org_a, [])
-}
-
 test_3_questionnaire_read if {
 	data.umzh.authz.allow with input as req_in("GET", "Questionnaire", "q1", "system/Questionnaire.r", org_a, [])
 }
@@ -231,6 +331,53 @@ test_4_denied_without_scope if {
 		with http.send as mock_sr_ok
 }
 
+test_4_denied_sr_not_active if {
+	not data.umzh.authz.allow with input as req_in("GET", "Patient", "p1", "system/Patient.r", org_a, sr_ctx)
+		with http.send as mock_sr_revoked
+}
+
+test_4_denied_blank_id if {
+	not data.umzh.authz.allow with input as req_in("GET", "Patient", "", "system/Patient.r", org_a, sr_ctx)
+		with http.send as mock_sr_blank_ref
+}
+
+# The fetch would read the old, still active version.
+test_4_denied_versioned_context if {
+	not data.umzh.authz.allow with input as req_in("GET", "Patient", "p1", "system/Patient.r", org_a, [{"reference": "ServiceRequest/sr1/_history/1"}])
+		with http.send as mock_sr_ok
+}
+
+# ============================================================================
+# Rule 4 — QuestionnaireResponse (basedOn back-reference or forward pointer)
+# ============================================================================
+test_4_qr_allowed_via_based_on if {
+	data.umzh.authz.allow with input as req_in("GET", "QuestionnaireResponse", "qr1", "system/QuestionnaireResponse.r", org_a, sr_ctx)
+		with http.send as mock_qr_relative
+}
+
+test_4_qr_allowed_via_supporting_info if {
+	data.umzh.authz.allow with input as req_in("GET", "QuestionnaireResponse", "qr1", "system/QuestionnaireResponse.r", org_a, sr_ctx)
+		with http.send as mock_qr_forward
+}
+
+test_4_qr_denied_for_other_root if {
+	not data.umzh.authz.allow with input as req_in("GET", "QuestionnaireResponse", "qr1", "system/QuestionnaireResponse.r", org_a, sr_ctx)
+		with http.send as mock_qr_other_root
+}
+
+test_4_qr_denied_for_other_server if {
+	not data.umzh.authz.allow with input as req_in("GET", "QuestionnaireResponse", "qr1", "system/QuestionnaireResponse.r", org_a, sr_ctx)
+		with http.send as mock_qr_other_server
+}
+
+# The IG's condition for trusting basedOn: only the Placer writes these.
+test_4_qr_writes_denied if {
+	every method in ["POST", "PUT", "PATCH", "DELETE"] {
+		not data.umzh.authz.allow with input as req_in(method, "QuestionnaireResponse", "qr1", "system/QuestionnaireResponse.cruds", org_a, sr_ctx)
+			with http.send as mock_qr_relative
+	}
+}
+
 # ============================================================================
 # Rule 4b — Task graph (placer reading Task output)
 # ============================================================================
@@ -239,22 +386,28 @@ test_4b_task_output_read_allowed if {
 		with http.send as mock_task_ctx_ok
 }
 
+test_4b_denied_blank_id if {
+	not data.umzh.authz.allow with input as req_in("GET", "Patient", "", "system/Patient.r", org_a, task_ctx)
+		with http.send as mock_task_blank_ref
+}
+
+# The fetch would read an old version, with outputs since removed.
+test_4b_denied_versioned_context if {
+	not data.umzh.authz.allow with input as req_in("GET", "DocumentReference", "d1", "system/DocumentReference.r", org_a, [{"reference": "Task/t1/_history/1"}])
+		with http.send as mock_task_ctx_ok
+}
+
+# The Placer fills Task.input, so it must not extend what the Placer can read.
+test_4b_task_input_not_in_graph if {
+	not data.umzh.authz.allow with input as req_in("GET", "Patient", "p9", "system/Patient.r", org_a, task_ctx)
+		with http.send as mock_task_ctx_input
+}
+
 # ============================================================================
 # Rule 5 — metadata (always)
 # ============================================================================
 test_5_metadata_allowed if {
 	data.umzh.authz.allow with input as {"method": "GET", "path": "/fhir/metadata", "resource_type": "", "resource_id": "", "token": {"organization_reference": "", "scope": "", "fhir_context": []}, "fhir_base": fhir_base}
-}
-
-# ============================================================================
-# Rule 6 — directory reads
-# ============================================================================
-test_6_organization_read_allowed if {
-	data.umzh.authz.allow with input as req_in("GET", "Organization", "o1", "system/Organization.r", org_a, [])
-}
-
-test_6_denied_without_scope if {
-	not data.umzh.authz.allow with input as req_in("GET", "Organization", "o1", "system/Patient.r", org_a, [])
 }
 
 # ============================================================================
@@ -273,7 +426,7 @@ test_combined_scope_task_create if {
 # Wildcard resource scopes are NOT supported: `system/*.r` must not grant a read
 # on a concrete type (has_smart_scope matches the resource literally).
 test_wildcard_scope_denied if {
-	not data.umzh.authz.allow with input as req_in("GET", "Organization", "o1", "system/*.r", org_a, [])
+	not data.umzh.authz.allow with input as req_in("GET", "Questionnaire", "q1", "system/*.r", org_a, [])
 }
 
 test_wildcard_scope_denied_task if {
@@ -285,4 +438,8 @@ test_wildcard_scope_denied_task if {
 # ============================================================================
 test_uncontexted_read_denied if {
 	not data.umzh.authz.allow with input as req_in("GET", "Patient", "p1", "system/Patient.r", org_a, [])
+}
+
+test_uncontexted_directory_read_denied if {
+	not data.umzh.authz.allow with input as req_in("GET", "Organization", "o1", "system/Organization.r", org_a, [])
 }

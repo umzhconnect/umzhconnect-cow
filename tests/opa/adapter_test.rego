@@ -63,6 +63,85 @@ test_allow_true_task_search if {
 		with data.config as {"fhir_base": "http://hapi/fhir/clinical-orders"}
 }
 
+# The adapter hands _include values to main.rego, which decides on them.
+test_task_output_include_denied_without_context if {
+	data.umzh.authz.gateway.allow == false with input as {"request": {
+		"method": "GET", "path": "/fhir/Task",
+		"query": {"_include": "Task:output-value-reference"},
+		"headers": _bearer,
+	}}
+		with data.config as {"fhir_base": "http://hapi/fhir/clinical-orders"}
+}
+
+# --- Refused here, whatever main.rego decides --------------------------------
+_bearer := {"authorization": sprintf("Bearer %s", [_task_token])}
+
+_decide(request) := allow if {
+	allow := data.umzh.authz.gateway.allow with input as {"request": request}
+		with data.umzh.authz.allow as true
+		with data.config as {"fhir_base": "http://hapi/fhir/clinical-orders"}
+}
+
+_get(path, query) := {"method": "GET", "path": path, "query": query, "headers": _bearer}
+
+test_valid_id_allowed if {
+	_decide(_get("/fhir/QuestionnaireResponse", {"_id": "Ab-1.2"})) == true
+}
+
+# OPA's fetch stops at the #, while HAPI's search returns victim.
+test_smuggled_id_denied if {
+	_decide(_get("/fhir/QuestionnaireResponse", {"_id": "good#/QuestionnaireResponse/victim"})) == false
+}
+
+test_get_without_query_denied if {
+	_decide({"method": "GET", "path": "/fhir/Task", "headers": _bearer}) == false
+}
+
+# A raw query string would hide its _include from the gate just the same.
+test_non_object_query_denied if {
+	every query in ["_include=Task:output-value-reference", null, ["_include=Task:output-value-reference"]] {
+		_decide(_get("/fhir/Task", query)) == false
+	}
+}
+
+# Only Task has the gate that needs query: /fhir/metadata and other reads don't.
+test_other_type_without_query_allowed if {
+	_decide({"method": "GET", "path": "/fhir/metadata", "headers": _bearer}) == true
+}
+
+test_task_read_without_query_allowed if {
+	_decide({"method": "GET", "path": "/fhir/Task/t1", "headers": _bearer}) == true
+}
+
+test_post_without_query_allowed if {
+	_decide({"method": "POST", "path": "/fhir/Task", "headers": _bearer}) == true
+}
+
+# --- _include values: a lone value is a string, repeated ones an array -------
+_with_query(query) := {"request": {"path": "/fhir/Task", "query": query, "headers": {}}}
+
+test_includes_lone_value if {
+	data.umzh.authz.gateway.includes == ["Task:output-value-reference"] with input as _with_query({"_include": "Task:output-value-reference"})
+}
+
+test_includes_repeated_value if {
+	data.umzh.authz.gateway.includes == ["A:a", "B:b"] with input as _with_query({"_include": ["A:a", "B:b"]})
+}
+
+test_includes_any_modifier if {
+	includes := data.umzh.authz.gateway.includes with input as _with_query({
+		"_include": "A:a",
+		"_include:iterate": ["B:b", "C:c"],
+		"_include:recurse": "D:d",
+	})
+	{value | some value in includes} == {"A:a", "B:b", "C:c", "D:d"}
+}
+
+# A bare `?_include` reaches OPA as a boolean: kept, so the policy can refuse it.
+test_includes_keeps_non_string_value if {
+	data.umzh.authz.gateway.includes == [true] with input as _with_query({"_include": true})
+}
+
 # --- fhir_base resolution: env override vs data document ---------------------
 # Default: no FHIR_BASE env → fhir_base comes from the opa-config.json data doc.
 test_fhir_base_from_data_config if {

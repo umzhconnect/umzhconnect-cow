@@ -16,7 +16,7 @@ Three layers, following the testing pyramid:
 
 ## OPA policy unit tests (rule coverage)
 
-`tests/opa/main_test.rego` covers rules 1a–6 and every branch (scope present/
+`tests/opa/main_test.rego` covers rules 1a–5 and every branch (scope present/
 absent, org match/mismatch, consent active/expired/missing, resource in/out of
 graph); `tests/opa/adapter_test.rego` covers the gateway/PEP path/query parsing in
 `gateway.rego`. Rules that call `http.send` (Task/Consent/ServiceRequest fetches)

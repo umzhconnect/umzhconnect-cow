@@ -45,6 +45,14 @@ HTTP 200
 jsonpath "$.resourceType" == "Bundle"
 jsonpath "$.entry[*].resource.id" includes "{{task_id}}"
 
+# Delta polling — _lastUpdated passes the guard.
+GET {{gateway_url}}/fhir/Task?_lastUpdated=gt2000-01-01
+Authorization: Bearer {{token}}
+Cache-Control: no-cache
+HTTP 200
+[Asserts]
+jsonpath "$.entry[*].resource.id" includes "{{task_id}}"
+
 # Read by id — Rule 1b (requester == our org).
 GET {{gateway_url}}/fhir/Task/{{task_id}}
 Authorization: Bearer {{token}}
@@ -66,6 +74,19 @@ HTTP 200
 jsonpath "$.businessStatus.text" == "received"
 
 # --- Negatives (gateway path) ------------------------------------------------
+
+# owner is no longer a Task search parameter → capability-guard 400.
+GET {{gateway_url}}/fhir/Task?owner={{our_org}}
+Authorization: Bearer {{token}}
+HTTP 400
+[Asserts]
+jsonpath "$.issue[0].diagnostics" contains "unsupported search parameter: owner"
+
+# Task outputs are context-gated: this token has no Task context, so OPA denies
+# the _include (403) before HAPI is asked.
+GET {{gateway_url}}/fhir/Task?_id={{task_id}}&_include=Task:output-value-reference
+Authorization: Bearer {{token}}
+HTTP 403
 
 # A non-patchable field → capability-guard 400 (before OPA / upstream).
 PATCH {{gateway_url}}/fhir/Task/{{task_id}}

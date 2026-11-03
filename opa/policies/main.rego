@@ -15,11 +15,12 @@
 #   1. Resolve fhirContext reference → ServiceRequest/<id>
 #   2. Search Consent?data=ServiceRequest/<id>&status=active in this partition
 #   3. Verify provision.actor == token.organization_reference (exact) + not expired
-#   4. Fetch the ServiceRequest and compute its forward-reference graph
+#   4. Fetch the ServiceRequest, require status active, compute its graph
 #   5. Permit if the requested resource is in the graph
 #
 # Rule 4b — Task-rooted context (placer reading Task output from fulfiller):
-#   Same steps, but root is Task/<id> and the graph walks Task.output[].valueReference
+#   Same steps, but root is Task/<id>, no status check, and the graph walks
+#   Task.output[].valueReference
 # =============================================================================
 
 package umzh.authz
@@ -29,14 +30,6 @@ import rego.v1
 # Default deny
 default allow := false
 
-# Recommended HTTP status code for callers.
-# NOTE: OPA's REST API (/v1/data/...) always returns HTTP 200 for successful
-# evaluations — this value appears in result.http_status in the response body
-# for callers (sidecars, gateways) to use, but does NOT change OPA's own
-# HTTP response code.
-default http_status := 200
-http_status := 403 if { not allow }
-
 # ---------------------------------------------------------------------------
 # Input structure expected from the gateway/PEP adapter (`gateway.rego`):
 # {
@@ -44,6 +37,7 @@ http_status := 403 if { not allow }
 #   "path": "/fhir/Patient/123",
 #   "resource_type": "Patient",
 #   "resource_id": "123",
+#   "includes": [],
 #   "token": {
 #     "organization_reference": "http://localhost:8084/fhir/Organization/HospitalF",
 #     "scope":                  "system/Patient.r system/Task.crus ...",
@@ -72,19 +66,22 @@ allow if {
 	input.resource_id == ""
 	input.token.organization_reference != ""
 	has_smart_scope("Task", "s")
+	not task_include_needs_context
 }
 
 # ==========================================================================
 # Rule 1b: Task read by id — require system/Task.r AND the fetched Task's
-# requester field must equal the calling party's organization_reference
+# requester field must equal the calling party's organization_reference.
+# Also serves GET /Task?_id=<id>, where an _include may need a Task context.
 # ==========================================================================
 allow if {
 	input.resource_type == "Task"
 	input.method == "GET"
 	input.resource_id != ""
 	has_smart_scope("Task", "r")
-	task := fetched_task(input.resource_id)
+	task := fetched_resource(requested_ref)
 	task.requester.reference == input.token.organization_reference
+	task_include_permitted
 }
 
 # ==========================================================================
@@ -101,23 +98,15 @@ allow if {
 # Rule 1d: Task update (PATCH) — scope AND caller must be the Task owner.
 # PATCH is the only update method exposed on Task (PUT/DELETE have no route →
 # default-deny). The data consumer (requester) must NOT mutate the Task: Rule 4b
-# and the Task _include path derive read authorization from Task.input/output, so
-# owner-only writes keep that graph trustworthy. Missing owner → fail-closed.
+# and the Task _include path derive read authorization from Task.output, which
+# the PATCH route can't change. Missing owner → fail-closed.
 # ==========================================================================
 allow if {
 	input.resource_type == "Task"
 	input.method == "PATCH"
 	has_smart_scope("Task", "u")
-	task := fetched_task(input.resource_id)
+	task := fetched_resource(requested_ref)
 	task.owner.reference == input.token.organization_reference
-}
-
-# ==========================================================================
-# Rule 2: Allow QuestionnaireResponse operations (no consent needed)
-# ==========================================================================
-allow if {
-	input.resource_type == "QuestionnaireResponse"
-	has_smart_scope("QuestionnaireResponse", method_to_action(input.method))
 }
 
 # ==========================================================================
@@ -135,7 +124,8 @@ allow if {
 allow if {
 	input.method == "GET"
 	input.resource_type != "Task"
-	input.resource_type != "QuestionnaireResponse"
+	# A blank _id arrives as "", and HAPI would then return every resource.
+	input.resource_id != ""
 	has_smart_scope(input.resource_type, "r")
 	# Per-context: there must be a ServiceRequest context that has its own
 	# valid Consent AND whose graph contains the requested resource.  Each
@@ -143,6 +133,7 @@ allow if {
 	# one context never grants access to another context's graph.
 	some sr_ref in fhir_context_sr_refs
 	consent_grants(sr_ref)
+	fetched_resource(sr_ref).status == "active"
 	resource_in_graph(sr_ref)
 }
 
@@ -158,6 +149,7 @@ allow if {
 allow if {
 	input.method == "GET"
 	input.resource_type != "Task"
+	input.resource_id != ""
 	has_smart_scope(input.resource_type, "r")
 	some task_ref in fhir_context_task_refs
 	consent_grants(task_ref)
@@ -172,32 +164,42 @@ allow if {
 }
 
 # ==========================================================================
-# Rule 6: Allow Organisation and Practitioner directory reads
-# ==========================================================================
-allow if {
-	input.method == "GET"
-	input.resource_type in {"Organization", "Practitioner", "PractitionerRole"}
-	has_smart_scope(input.resource_type, "r")
-}
-
-# ==========================================================================
 # fhirContext resolution
 # ==========================================================================
 
 # All ServiceRequest references carried by the fhirContext claim.  A token may
 # bind to more than one workflow context — RFC 9396 authorization_details is an
-# array — so this is a set, and each entry is evaluated independently.
+# array — so this is a set, and each entry is evaluated independently.  Anchored:
+# a /_history/<n> suffix would make the fetches read an old version.
 fhir_context_sr_refs contains ref if {
 	some ctx in input.token.fhir_context
-	startswith(ctx.reference, "ServiceRequest/")
+	regex.match(`^ServiceRequest/[A-Za-z0-9.-]{1,64}$`, ctx.reference)
 	ref := ctx.reference
 }
 
 # All Task references carried by the fhirContext claim (Task-rooted contexts).
 fhir_context_task_refs contains ref if {
 	some ctx in input.token.fhir_context
-	startswith(ctx.reference, "Task/")
+	regex.match(`^Task/[A-Za-z0-9.-]{1,64}$`, ctx.reference)
 	ref := ctx.reference
+}
+
+# ==========================================================================
+# Task _include — what it pulls in is context-gated, the Task itself is not
+# ==========================================================================
+
+# Task:output-value-canonical is exempt for Questionnaires, but until POST rejects
+# output it can return whatever a caller put there.
+task_include_needs_context if {
+	some value in input.includes
+	value != "Task:output-value-canonical"
+}
+
+task_include_permitted if not task_include_needs_context
+
+task_include_permitted if {
+	requested_ref in fhir_context_task_refs
+	consent_grants(requested_ref)
 }
 
 # ==========================================================================
@@ -269,42 +271,29 @@ consent_grants(sr_ref) if {
 # ServiceRequest graph — derive resource scope from a fhirContext reference
 # ==========================================================================
 
-# Fetch a Task by id from this party's partition.  Not cached: Task state
-# (and in principle Task.requester) can change; the requester check must
-# read the current value.
-fetched_task(task_id) := task if {
-	url := concat("/", [input.fhir_base, "Task", task_id])
-	resp := http.send({
-		"method":            "GET",
-		"url":               url,
-		"headers":           _fhir_headers,
-		"force_json_decode": true,
-	})
-	resp.status_code == 200
-	task := resp.body
-}
+# The resource this request names, e.g. "Patient/123".
+requested_ref := concat("/", [input.resource_type, input.resource_id])
 
-# Fetch the ServiceRequest named by <sr_ref>.  Cached: a ServiceRequest is
-# immutable for the lifetime of the workflow it anchors.
-fetched_service_request(sr_ref) := sr if {
-	url := concat("/", [input.fhir_base, sr_ref])
+# Fetch <ref> from this party's partition.  Not cached: Task state,
+# ServiceRequest.status and QuestionnaireResponse.basedOn all decide access.
+fetched_resource(ref) := resource if {
+	url := concat("/", [input.fhir_base, ref])
 	resp := http.send({
 		"method":            "GET",
 		"url":               url,
 		"headers":           _fhir_headers,
 		"force_json_decode": true,
-		"cache":             true,
 	})
 	resp.status_code == 200
-	sr := resp.body
+	resource := resp.body
 }
 
 # The set of resource references reachable from ServiceRequest <sr_ref>: the SR
 # itself plus everything its subject, requester, reasonReference, supportingInfo
 # and insurance fields point to.  performer is intentionally excluded — it is the
-# receiving organisation, already reachable via Rule 6 (directory reads).
+# receiving organisation.
 service_request_graph(sr_ref) := graph if {
-	sr := fetched_service_request(sr_ref)
+	sr := fetched_resource(sr_ref)
 	graph := (
 		{sr_ref} |
 		{ref | ref := sr.subject.reference} |
@@ -319,10 +308,17 @@ service_request_graph(sr_ref) := graph if {
 # Helper: the requested resource lies within ServiceRequest <sr_ref>'s graph
 # ==========================================================================
 resource_in_graph(sr_ref) if {
-	resource_ref := concat("/", [input.resource_type, input.resource_id])
 	some ref in service_request_graph(sr_ref)
 	# endswith handles both relative ("Patient/X") and absolute URL references
-	endswith(ref, resource_ref)
+	endswith(ref, requested_ref)
+}
+
+# QuestionnaireResponse.basedOn is the one back-reference the IG admits.  Exact
+# match: both resources live on this server, so an absolute URL may name another.
+resource_in_graph(sr_ref) if {
+	input.resource_type == "QuestionnaireResponse"
+	some based_on in fetched_resource(requested_ref).basedOn
+	based_on.reference == sr_ref
 }
 
 # ==========================================================================
@@ -330,14 +326,13 @@ resource_in_graph(sr_ref) if {
 # ==========================================================================
 
 # The set of resource references reachable from Task <task_ref>: the Task
-# itself plus everything its input[].valueReference and output[].valueReference
-# fields point to.
+# itself plus everything its output[].valueReference fields point to.  Not
+# Task.input: the Placer fills it, so it must not decide what the Placer can read.
+# The same goes for Task.output on POST, until POST rejects it.
 task_graph(task_ref) := graph if {
-	task_id := split(task_ref, "/")[1]
-	task := fetched_task(task_id)
+	task := fetched_resource(task_ref)
 	graph := (
 		{task_ref} |
-		{ref | some item in task.input;  ref := item.valueReference.reference} |
 		{ref | some item in task.output; ref := item.valueReference.reference}
 	)
 }
@@ -346,9 +341,8 @@ task_graph(task_ref) := graph if {
 # Helper: the requested resource lies within Task <task_ref>'s graph
 # ==========================================================================
 resource_in_task_graph(task_ref) if {
-	resource_ref := concat("/", [input.resource_type, input.resource_id])
 	some ref in task_graph(task_ref)
-	endswith(ref, resource_ref)
+	endswith(ref, requested_ref)
 }
 
 # ==========================================================================
@@ -361,57 +355,4 @@ has_smart_scope(resource, action) if {
 	ra := split(parts[1], ".")
 	ra[0] == resource
 	contains(ra[1], action)
-}
-
-# ==========================================================================
-# Helper: Map HTTP method to SMART on FHIR action letter
-# ==========================================================================
-method_to_action(method) := action if {
-	actions := {
-		"GET":    "r",
-		"POST":   "c",
-		"PUT":    "u",
-		"PATCH":  "u",
-		"DELETE": "d",
-	}
-	action := actions[method]
-}
-
-# ==========================================================================
-# Decision response (full context, useful for debugging)
-# ==========================================================================
-decision := {
-	"allow":                  allow,
-	"organization_reference": input.token.organization_reference,
-	"resource_type":          input.resource_type,
-	"method":                 input.method,
-	"fhir_context":           input.token.fhir_context,
-	"reason":                 reason,
-}
-
-reason := "Task operations are owner-based, no consent needed" if {
-	input.resource_type == "Task"
-	allow
-}
-
-reason := "Directory resource access granted" if {
-	input.resource_type in {"Organization", "Practitioner", "PractitionerRole"}
-	allow
-}
-
-reason := "Resource access granted via valid consent" if {
-	not input.resource_type in {"Task", "Organization", "Practitioner", "PractitionerRole"}
-	allow
-	some sr_ref in fhir_context_sr_refs
-	consent_grants(sr_ref)
-}
-
-reason := "Resource access granted via Task context graph and valid consent" if {
-	allow
-	some task_ref in fhir_context_task_refs
-	consent_grants(task_ref)
-}
-
-reason := "Access denied: insufficient scope, missing or invalid consent, or resource not in context graph" if {
-	not allow
 }
