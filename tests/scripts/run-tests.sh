@@ -15,8 +15,9 @@
 #   tests/scripts/run-tests.sh
 #
 # To run the SAME tests against a real auth server, bring up the base stack
-# (no overlay) and set TOKEN_SOURCE=real (+ CLIENT_ID, and CALLER_ORG/OUR_ORG to
-# the registered client's org). The runner then mints via the L2 flow instead.
+# (no overlay) and set TOKEN_SOURCE=real (+ CALLER_ORG/OUR_ORG to the registered
+# client's org; the client itself is the custodian's L2_CLIENT_ID). The runner
+# then mints via the L2 flow instead.
 #
 # JUnit XML → tests/reports/. Exit non-zero if any executed file fails.
 # =============================================================================
@@ -66,7 +67,7 @@ run "${HURL_DIR}/02-auth-negative.hurl"
 if [ "$TOKEN_SOURCE" = "mock" ]; then
     auth_probe="${MOCK_AUTH_URL}/healthz"; auth_hint="bring up docker-compose.test.yml"
 else
-    auth_probe="${CUSTODIAN_URL}/healthz"; auth_hint="start the stack and set CLIENT_ID"
+    auth_probe="${CUSTODIAN_URL}/healthz"; auth_hint="start the stack (key-custodian)"
 fi
 
 if curl -sf --max-time 5 "$auth_probe" > /dev/null 2>&1; then

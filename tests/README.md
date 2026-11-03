@@ -87,10 +87,10 @@ mints each scenario's token and passes it to Hurl, so the Hurl files never chang
   **Never run `mock-auth` outside tests** — it signs any claims you ask for.
 - **`TOKEN_SOURCE=real`** — run the base stack (no overlay) and:
   ```bash
-  TOKEN_SOURCE=real CLIENT_ID=<l2-client> \
+  TOKEN_SOURCE=real \
     CALLER_ORG=<client-org> OUR_ORG=<client-org> tests/scripts/run-tests.sh
   ```
-  Tokens come from the real L2 flow (custodian `/sign` → exchange), with
+  Tokens come from the real L2 flow (custodian `/token` signs + exchanges), with
   the context supplied as RFC 9396 `authorization_details`. Note `scope` and
   `organization_reference` are then fixed by the **registered client**, so
   `CALLER_ORG` must equal that client's org (and the seeded Consent actor). Purely
@@ -117,7 +117,6 @@ removes them afterward (an `EXIT` trap). `fulfiller.hurl` creates its own Tasks
 | `CUSTODIAN_URL` | `http://localhost:9087` | key custodian |
 | `OPA_URL` | `http://localhost:9181` | OPA |
 | `MOCK_AUTH_URL` | `http://localhost:9099` | mock issuer `/token` |
-| `CLIENT_ID` | `fulfiller-client-l2` | L2 client id (`real` only) |
 | `CALLER_ORG` | `…/Organization/HospitalA` | placer: reading org = Consent actor |
 | `OUR_ORG` | `…/Organization/HospitalB` | fulfiller: Task requester |
 | `SR_ID` / `PAT_ID` | `sr-e2e` / `pat-e2e` | seeded fixture ids |

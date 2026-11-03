@@ -99,18 +99,20 @@ services:
         aliases:
           - opa-${PARTY}
 
-  # ── Key Custodian — holds this party's L2 key; signs assertions + serves JWKS ─
+  # ── Key Custodian — holds this party's L2 key; brokers tokens + serves JWKS ──
   key-custodian:
     build:
       context: ./key-custodian
       dockerfile: Dockerfile
     container_name: party-key-custodian
     environment:
-      PARTY: ${PARTY}
       CLIENT_ID: ${L2_CLIENT_ID}
       KID: ${L2_KID}
-      # Default assertion audience = the auth server's advertised issuer endpoint.
-      KEYCLOAK_AUDIENCE: ${AUTH_SERVER_PUBLIC_URL}/realms/${AUTH_SERVER_REALM}/protocol/openid-connect/token
+      # Where the custodian POSTs the client_credentials exchange (backchannel —
+      # localhost inside this container would be the container itself).
+      TOKEN_ENDPOINT: ${AUTH_SERVER_URL}/realms/${AUTH_SERVER_REALM}/protocol/openid-connect/token
+      # The assertion `aud`: the token endpoint the auth server advertises.
+      AUDIENCE: ${AUTH_SERVER_PUBLIC_URL}/realms/${AUTH_SERVER_REALM}/protocol/openid-connect/token
     volumes:
       - ./keys/l2.key:/keys/private.key:ro
       - ./keys/l2.jwks.json:/keys/jwks.json:ro
