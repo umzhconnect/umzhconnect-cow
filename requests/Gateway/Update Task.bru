@@ -1,0 +1,34 @@
+meta {
+  name: Update Task
+  type: http
+  seq: 4
+}
+
+put {
+  url: {{gatewayUrl}}/fhir/Task/{{taskId}}
+  body: json
+}
+
+headers {
+  Authorization: Bearer {{accessToken}}
+  Content-Type: application/fhir+json
+  If-Match: W/"{{taskVersion}}"
+}
+
+body:json {
+  {
+    "resourceType": "Task",
+    "id": "{{taskId}}",
+    "status": "cancelled",
+    "intent": "order",
+    "requester": { "reference": "{{orgRef}}" },
+    "owner": { "reference": "{{orgRef}}" }
+  }
+}
+
+docs {
+  Cancel the Task (OPA Rule 1d: system/Task.u scope AND requester == your org AND
+  a permitted change). The body is the full Task as created, with only the status
+  changed. A missing or stale If-Match returns 412, any other change 403. Run
+  "Create Task" first to set {{taskId}} and {{taskVersion}}.
+}

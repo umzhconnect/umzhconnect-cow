@@ -22,14 +22,16 @@ body:json {
         "query": {},
         "headers": {
           "authorization": "Bearer {{bearerToken}}"
-        }
+        },
+        "body": "{\"resourceType\":\"Task\",\"requester\":{\"reference\":\"{{orgRef}}\"}}"
       }
     }
   }
 }
 
 docs {
-  May this caller create a Task (POST /fhir/Task)? Scope-only rule — allows when
-  the token carries system/Task.c (or system/Task.crus). OPA never sees the Task
-  body; it decides on the operation + token alone. Response: { "result": true|false }.
+  May this caller create a Task (POST /fhir/Task)? Allows when the token carries
+  system/Task.c (or system/Task.crus), and the body, sent as a raw string, names
+  the token's org as requester and has no output or businessStatus. Response:
+  { "result": true|false }.
 }
