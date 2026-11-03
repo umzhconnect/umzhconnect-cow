@@ -18,7 +18,7 @@ rendered from `.env` at startup, and its L2 signing key is generated locally
 | Service | Role |
 |---|---|
 | `apisix-external` | External API gateway — JWT auth + OPA policy in front of `clinical-orders-fhir`. Runs the same standalone config as the k8s gateway (`clinical-orders/apisix/`); auth/OPA URLs from env. |
-| `opa` | Consent / fhirContext policy engine (party-local Rego in `opa/policies/`). |
+| `opa` | Consent / context policy engine (party-local Rego in `opa/policies/`). |
 | `hapi-fhir` | The party's partitioned FHIR store (base), backed by a **managed (external) Postgres** — see below. Partition: `clinical-orders` (this party's data, acts as fulfiller). Internal only — reached via the proxy below. |
 | `clinical-orders-fhir` | Outward, **partition-less** FHIR proxy for this party's `clinical-orders` partition (mirrors the k8s proxy). Maps `/fhir/*` → base `/fhir/clinical-orders/*` and strips the partition out of self-links/`Location`. |
 | `key-custodian` | Holds the party's L2 private key; signs `private_key_jwt` assertions and serves the JWK Set. |
@@ -240,7 +240,7 @@ Bruno collection for manual exploration. See `tests/README.md` and
 `requests/README.md`.
 
 A cross-party read then flows: this party's caller → mint an M2M token at the
-auth server (assertion signed by `key-custodian`, fhirContext via RFC 9396
+auth server (assertion signed by `key-custodian`, context via RFC 9396
 `authorization_details`) → call the partner's external gateway directly. No
 internal proxy is involved.
 
@@ -276,7 +276,7 @@ it can run alongside the sandbox.
   (`opa/opa-config.json`) — no render step.
 - **SMART-scope + context-centric authz.** Access is decided entirely by SMART
   system scopes plus the token's `organization_reference` and consent /
-  fhirContext graph (`opa/policies/main.rego`); there is no coarse realm-role
+  context graph (`opa/policies/main.rego`); there is no coarse realm-role
   gate. Multi-partner support comes from the registry + consent, not an allow-list.
 - **Fully self-contained.** The gateway (config + plugins), the OPA policies, and
   the **key-custodian** (`key-custodian/`) are all vendored here — nothing is

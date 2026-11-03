@@ -4,15 +4,15 @@
 # Main policy package for context-centric authorization enforcement.
 #
 # Authorization model:
-# The access token carries a `fhirContext` claim (SMART v2) derived from
-# RFC 9396 `authorization_details` (type "umzh-connect-context").  The Consent
-# is no longer named by the token; instead OPA locates it by searching
+# The access token carries the context in its RFC 9396 `authorization_details`
+# claim, whose identifier names the workflow root.  The Consent is not named by
+# the token; instead OPA locates it by searching
 # `Consent?data=ServiceRequest/<id>&status=active` and verifies the actor.
 #
 # Two workflow-root types are supported (Rule 4 / Rule 4b):
 #
 # Rule 4 — ServiceRequest-rooted context (fulfiller reading from placer):
-#   1. Resolve fhirContext reference → ServiceRequest/<id>
+#   1. Resolve the context → ServiceRequest/<id>
 #   2. Search Consent?data=ServiceRequest/<id>&status=active in this partition
 #   3. Verify provision.actor == token.organization_reference (exact) + not expired
 #   4. Fetch the ServiceRequest, require status active, compute its graph
@@ -41,10 +41,11 @@ default allow := false
 #   "includes": [],
 #   "body": {},
 #   "if_match": "",
+#   "read_action": "r",
 #   "token": {
 #     "organization_reference": "http://localhost:8084/fhir/Organization/HospitalF",
-#     "scope":                  "system/Patient.r system/Task.crus ...",
-#     "fhir_context":           [{"reference": "ServiceRequest/sr-123"}]
+#     "scope":                  "system/Patient.rs system/Task.crus ...",
+#     "contexts":               ["ServiceRequest/sr-123"]
 #   },
 #   "fhir_base": "http://nginx-proxy:81/fhir/placer"
 # }
@@ -75,13 +76,14 @@ allow if {
 # ==========================================================================
 # Rule 1b: Task read by id — require system/Task.r AND the fetched Task's
 # requester field must equal the calling party's organization_reference.
-# Also serves GET /Task?_id=<id>, where an _include may need a Task context.
+# Also serves GET /Task?_id=<id>, which needs system/Task.s instead, and where
+# an _include may need a Task context.
 # ==========================================================================
 allow if {
 	input.resource_type == "Task"
 	input.method == "GET"
 	input.resource_id != ""
-	has_smart_scope("Task", "r")
+	has_smart_scope("Task", input.read_action)
 	task := fetched_resource(requested_ref)
 	task.requester.reference == input.token.organization_reference
 	task_include_permitted
@@ -119,37 +121,33 @@ allow if {
 allow if {
 	input.resource_type == "Questionnaire"
 	input.method == "GET"
-	has_smart_scope("Questionnaire", "r")
+	has_smart_scope("Questionnaire", input.read_action)
 }
 
 # ==========================================================================
-# Rule 4: Allow read of resources within the fhirContext service-request graph
+# Rule 4: Allow read of resources within the ServiceRequest context graph
 # ==========================================================================
 allow if {
 	input.method == "GET"
 	input.resource_type != "Task"
 	# A blank _id arrives as "", and HAPI would then return every resource.
 	input.resource_id != ""
-	has_smart_scope(input.resource_type, "r")
-	# Per-context: there must be a ServiceRequest context that has its own
-	# valid Consent AND whose graph contains the requested resource.  Each
-	# fhirContext entry is paired with its own Consent — a Consent covering
-	# one context never grants access to another context's graph.
-	some sr_ref in fhir_context_sr_refs
+	has_smart_scope(input.resource_type, input.read_action)
+	sr_ref := context_sr_ref
 	consent_grants(sr_ref)
 	fetched_resource(sr_ref).status == "active"
 	resource_in_graph(sr_ref)
 }
 
 # ==========================================================================
-# Rule 4b: Allow read of resources within the fhirContext Task graph
+# Rule 4b: Allow read of resources within the Task context graph
 # ==========================================================================
 allow if {
 	input.method == "GET"
 	input.resource_type != "Task"
 	input.resource_id != ""
-	has_smart_scope(input.resource_type, "r")
-	some task_ref in fhir_context_task_refs
+	has_smart_scope(input.resource_type, input.read_action)
+	task_ref := context_task_ref
 	fetched_resource(task_ref).requester.reference == input.token.organization_reference
 	resource_in_task_graph(task_ref)
 }
@@ -162,25 +160,17 @@ allow if {
 }
 
 # ==========================================================================
-# fhirContext resolution
+# Context resolution
 # ==========================================================================
 
-# All ServiceRequest references carried by the fhirContext claim.  A token may
-# bind to more than one workflow context — RFC 9396 authorization_details is an
-# array — so this is a set, and each entry is evaluated independently.  Anchored:
-# a /_history/<n> suffix would make the fetches read an old version.
-fhir_context_sr_refs contains ref if {
-	some ctx in input.token.fhir_context
-	regex.match(`^ServiceRequest/[A-Za-z0-9.-]{1,64}$`, ctx.reference)
-	ref := ctx.reference
-}
+# The token's one context.  None or several leaves it undefined, which denies
+# every context-gated request.
+context_ref := input.token.contexts[0] if count(input.token.contexts) == 1
 
-# All Task references carried by the fhirContext claim (Task-rooted contexts).
-fhir_context_task_refs contains ref if {
-	some ctx in input.token.fhir_context
-	regex.match(`^Task/[A-Za-z0-9.-]{1,64}$`, ctx.reference)
-	ref := ctx.reference
-}
+# Anchored: a /_history/<n> suffix would make the fetches read an old version.
+context_sr_ref := context_ref if regex.match(`^ServiceRequest/[A-Za-z0-9.-]{1,64}$`, context_ref)
+
+context_task_ref := context_ref if regex.match(`^Task/[A-Za-z0-9.-]{1,64}$`, context_ref)
 
 # ==========================================================================
 # Task _include — what it pulls in is context-gated, the Task itself is not
@@ -195,7 +185,7 @@ task_include_needs_context if {
 
 task_include_permitted if not task_include_needs_context
 
-task_include_permitted if requested_ref in fhir_context_task_refs
+task_include_permitted if requested_ref == context_task_ref
 
 # ==========================================================================
 # Task update — the IG's two changes a Placer may make
@@ -243,7 +233,7 @@ task_update_permitted(stored, submitted) if {
 }
 
 # ==========================================================================
-# Consent resolution — search by fhirContext reference
+# Consent resolution — search by the context's ServiceRequest
 # ==========================================================================
 
 # Headers OPA sends on its FHIR fetches. Always Accept JSON; additionally carry
@@ -308,7 +298,7 @@ consent_grants(sr_ref) if {
 }
 
 # ==========================================================================
-# ServiceRequest graph — derive resource scope from a fhirContext reference
+# ServiceRequest graph — derive resource scope from a ServiceRequest context
 # ==========================================================================
 
 # The resource this request names, e.g. "Patient/123".
@@ -362,7 +352,7 @@ resource_in_graph(sr_ref) if {
 }
 
 # ==========================================================================
-# Task graph — derive resource scope from a Task fhirContext reference
+# Task graph — derive resource scope from a Task context
 # ==========================================================================
 
 # The set of resource references reachable from Task <task_ref>: the Task

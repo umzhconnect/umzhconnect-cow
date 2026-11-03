@@ -20,12 +20,11 @@ body:json {
       "resource_type": "DocumentReference",
       "resource_id": "doc-e2e",
       "path": "/fhir/DocumentReference/doc-e2e",
+      "read_action": "r",
       "token": {
         "organization_reference": "{{orgA}}",
         "scope": "system/DocumentReference.r",
-        "fhir_context": [
-          { "reference": "Task/task-e2e" }
-        ]
+        "contexts": ["Task/task-e2e"]
       },
       "fhir_base": "{{opaFhirBase}}"
     }
@@ -33,7 +32,7 @@ body:json {
 }
 
 docs {
-  Rule 4b — read within a Task fhirContext graph. Requires system/<Type>.r AND the
+  Rule 4b — read within a Task context graph. Requires system/<Type>.r AND the
   fetched Task's requester == organization_reference AND the requested resource is
   referenced in Task.output[].valueReference.
 

@@ -32,7 +32,7 @@ body:json {
 
 docs {
   May this caller search ServiceRequest?_id=sr-e2e? OPA derives the target id from
-  query._id, then applies the fhirContext + Consent graph rule (system/
-  ServiceRequest.r + an active Consent naming the caller for the sr-e2e context).
+  query._id, then applies the context + Consent graph rule (system/
+  ServiceRequest.s + an active Consent naming the caller for the sr-e2e context).
   DATA-DEPENDENT (OPA fetches Consent/ServiceRequest). Response: { "result": true|false }.
 }

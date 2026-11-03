@@ -4,7 +4,7 @@
 # Sits between the ingress and the clinical-orders-fhir proxy and enforces:
 #   • authentication — openid-connect (bearer JWT validated against the auth
 #     server's JWKS/discovery)
-#   • authorization  — the opa plugin (consent / fhirContext policy)
+#   • authorization  — the opa plugin (consent / context policy)
 # then forwards /fhir/* to the clinical-orders-fhir proxy (which maps it onto the
 # base HAPI 'clinical-orders' partition).
 #

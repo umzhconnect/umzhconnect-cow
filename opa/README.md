@@ -1,4 +1,4 @@
-# opa — consent / fhirContext policy
+# opa — consent / context policy
 
 | Here (party-local) | What |
 |---|---|
@@ -10,7 +10,7 @@
 `policies/` holds only what the `umzh/authz/gateway` entrypoint needs:
 `gateway.rego` (the generic gateway/PEP request adapter — serves the APISIX
 gateway AND external consumers like MuleSoft) and `main.rego` (the consent /
-fhirContext rules it delegates to). These were forked from the two-party UMZH
+context rules it delegates to). These were forked from the two-party UMZH
 Connect sandbox (`services/opa/policies` there) and are now owned here —
 reconcile the two manually. The sandbox's `capabilities.rego` /
 `apisix_guarded.rego` (the OPA data-as-code param allowlist) are **not** copied,
@@ -19,7 +19,7 @@ because the gateway enforces param/`_include` allowlists at the edge via
 
 **Authorization is SMART-scope + context-centric.** Every rule in `main.rego`
 carries its own scope (`system/<Type>.<action>`) and identity condition
-(`organization_reference` match / consent / fhirContext graph). There is no
+(`organization_reference` match / consent / context graph). There is no
 coarse realm-role gate — `gateway.rego` delegates straight to `main.rego`. The one
 rule without a scope is `/fhir/metadata` (the public CapabilityStatement).
 
@@ -48,18 +48,18 @@ decision depends on.
 | Rule | Matches | Requires |
 |---|---|---|
 | **1a** | `GET /fhir/Task` (search) | `system/Task.s` **and** non-empty `organization_reference` (the gateway's injected `?requester=` filter scopes *what* is returned; this fails closed if the org ref is absent). Refuses a context-gated `_include` |
-| **1b** | `GET /fhir/Task/{id}`, `GET /fhir/Task?_id={id}` | `system/Task.r` **and** the fetched `Task.requester` == caller's `organization_reference`. A context-gated `_include` also needs a `Task/{id}` fhirContext entry |
+| **1b** | `GET /fhir/Task/{id}`, `GET /fhir/Task?_id={id}` | `system/Task.r`, or `.s` for the search, **and** the fetched `Task.requester` == caller's `organization_reference`. A context-gated `_include` also needs the context `Task/{id}` |
 | **1c** | `POST /fhir/Task` (create) | `system/Task.c` **and** the body's `Task.requester` == caller **and** no `Task.output` or `businessStatus` |
 | **1d** | `PUT /fhir/Task/{id}` | `system/Task.u` **and** the fetched `Task.requester` == caller **and** `If-Match` names its current version (else `412`) **and** the body differs only by a cancel while `requested`/`accepted`, or an answer while `awaiting-information` (`input` added, `businessStatus` removed). `meta`, `text` and `lastModified` are not compared |
-| **3** | `GET /fhir/Questionnaire/{id}`, `GET /fhir/Questionnaire` | `system/Questionnaire.r` |
-| **4** | `GET` of any type except Task | `system/<Type>.r` **and** an active, non-expired **Consent** (actor == caller) for a **ServiceRequest** fhirContext entry **and** that SR is `active` **and** the resource is in its graph. A QuestionnaireResponse is also in the graph if its `basedOn` is the SR's relative reference |
-| **4b** | `GET` of any type except Task | `system/<Type>.r` **and** a **Task** fhirContext entry whose fetched `Task.requester` == caller **and** the resource is in that Task's `output` graph |
+| **3** | `GET /fhir/Questionnaire/{id}`, `GET /fhir/Questionnaire` | `system/Questionnaire.r`, or `.s` for the search |
+| **4** | `GET` of any type except Task | `system/<Type>.r`, or `.s` for a search, **and** an active, non-expired **Consent** (actor == caller) for a **ServiceRequest** context **and** that SR is `active` **and** the resource is in its graph. A QuestionnaireResponse is also in the graph if its `basedOn` is the SR's relative reference |
+| **4b** | `GET` of any type except Task | `system/<Type>.r`, or `.s` for a search, **and** a **Task** context whose fetched `Task.requester` == caller **and** the resource is in that Task's `output` graph |
 | **5** | `GET /fhir/metadata` | nothing — public CapabilityStatement |
 
 Consent and ServiceRequest are re-read live on every request (not cached), so
 revocation, expiry and a ServiceRequest leaving `active` take effect immediately.
-Each ServiceRequest fhirContext entry is paired with its **own** Consent — a Consent
-covering one context never grants access to another.
+A token carries its context in the `authorization_details` claim: none or several
+denies every context-gated request.
 
 ## Optional backend auth (OPA → FHIR server)
 
@@ -176,7 +176,7 @@ Two test files under `tests/opa/`:
 | File | Package | Covers |
 |---|---|---|
 | `main_test.rego` | `umzh.authz_test` | every rule and its branches (scope present/absent, org match/mismatch, consent active/expired/missing, resource in/out of graph), plus the optional backend-auth header (attached when set, absent when unset) |
-| `adapter_test.rego` | `umzh.authz.gateway_test` | `gateway.rego`'s path/query parsing (`resource_type`, `resource_id`, `canonical_path`) for read-by-id vs. search shapes |
+| `adapter_test.rego` | `umzh.authz.gateway_test` | `gateway.rego`'s path/query parsing (`resource_type`, `resource_id`) for read-by-id vs. search shapes |
 
 **How the mocking works.** `main_test.rego` defines an input builder `req_in(method,
 type, id, scope, org, ctx)` that produces the exact input shape `main.rego`

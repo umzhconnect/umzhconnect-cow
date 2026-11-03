@@ -63,7 +63,7 @@ services:
     networks:
       - party-net
 
-  # ── OPA — consent / fhirContext policy engine ───────────────────────────────
+  # ── OPA — consent / context policy engine ───────────────────────────────────
   opa:
     image: openpolicyagent/opa:1.19.0
     platform: linux/amd64
