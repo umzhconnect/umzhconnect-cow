@@ -1,0 +1,40 @@
+meta {
+  name: Get token
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{custodianUrl}}/token
+  body: json
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "scope": "{{scope}}"
+  }
+}
+
+script:post-response {
+  if (res.body && res.body.access_token) {
+    bru.setEnvVar("accessToken", res.body.access_token);
+  }
+}
+
+docs {
+  The full L2 flow in one call: the key custodian signs the private_key_jwt
+  assertion AND runs the client_credentials exchange at the auth server, then
+  returns the token response. The access token is saved to `accessToken` and
+  carries this party's SMART scopes and organization_reference claim.
+
+  Body fields are optional: `scope` ({{scope}}) requests specific SMART scopes —
+  omit it to fall back to the custodian's DEFAULT_SCOPE. You can also pass RFC
+  9396 `authorization_details`, e.g.
+  [{"type": "http://fhir.ch/ig/ch-umzh-connect/context", "identifier": "ServiceRequest/<id>"}].
+  The client is always the custodian's CLIENT_ID; any other field is a 400.
+  The AS still decides what it grants.
+}
