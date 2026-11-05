@@ -5,7 +5,7 @@ meta {
 }
 
 post {
-  url: {{opaUrl}}/v1/data/umzh/authz/gateway/allow
+  url: {{opaUrl}}/v1/data/umzh/authz/gateway/decision
   body: json
 }
 
@@ -33,6 +33,7 @@ docs {
   may this caller run GET /fhir/Task? Pass the request being proxied
   (method/path/query) + the client's bearer. OPA decodes scope/org/context
   from the token and injects fhir_base from its OWN config — you pass NEITHER.
-  Response: { "result": true|false }. (Allows when the token carries system/Task.s
-  — or the combined system/Task.crus — and a non-empty org.)
+  Response: { "result": { "allow": true } } or
+  { "result": { "allow": false, "status_code": 403 } }. (Allows when the token
+  carries system/Task.s — or the combined system/Task.crus — and a non-empty org.)
 }

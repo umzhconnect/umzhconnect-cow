@@ -5,7 +5,7 @@ meta {
 }
 
 post {
-  url: {{opaUrl}}/v1/data/umzh/authz/gateway/allow
+  url: {{opaUrl}}/v1/data/umzh/authz/gateway/decision
   body: json
 }
 
@@ -29,6 +29,7 @@ body:json {
 docs {
   Default-deny check: the same Task search but with NO Authorization header. With
   no bearer to decode, the caller has no scope/org, so no rule matches →
-  { "result": false }. In production the gateway/openid-connect would already have
+  { "result": { "allow": false, "status_code": 403 } }. In production the
+  gateway/openid-connect would already have
   rejected an unauthenticated request; this shows OPA fails closed regardless.
 }
