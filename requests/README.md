@@ -26,7 +26,7 @@ OPA through its ingress asks for an authorization decision by forwarding **the
 request it is proxying + the client's bearer** — nothing else. OPA decodes the
 token and injects the backend address itself.
 
-- **Endpoint:** `POST {{opaUrl}}/v1/data/umzh/authz/gateway/allow` — the **adapter**
+- **Endpoint:** `POST {{opaUrl}}/v1/data/umzh/authz/gateway/decision` — the **adapter**
   entrypoint (`gateway.rego`). In production point `opaUrl` at OPA's ingress
   (`https://opa.dev.umzhc.io.usz.ch`).
 - **Body:** just the FHIR request being proxied, as `input.request`:
@@ -43,24 +43,24 @@ token and injects the backend address itself.
   any `if-match` / `if-none-exist` header: OPA denies a write it can't read. Forward
   the same `If-Match` and the identical body bytes to the FHIR server: the decision
   only holds for those.
-- **Response:** `{ "result": true }` (allow) or `{ "result": false }` (deny).
-  Treat anything that is not `true` as **deny**. After a `false` on a Task update,
-  send the same body to `/v1/data/umzh/authz/gateway/status_code`: `{ "result": 412 }`
-  (missing or stale `If-Match`) replaces the 403.
+- **Response:** `{ "result": { "allow": true } }` (allow) or
+  `{ "result": { "allow": false, "status_code": 403 } }` (deny). Treat anything
+  where `allow` is not `true` as **deny**, and answer the client with `status_code`:
+  412 on a Task update with a missing or stale `If-Match`, otherwise 403.
 - **The consumer passes NO `fhir_base`, NO scope, NO org, NO context.** OPA decodes
   `scope` / `organization_reference` / `authorization_details` from the bearer, and injects
   `fhir_base` (which FHIR server to read Consent/Task from) from its **own trusted
   config**. This is deliberate and security-critical: if a caller could set
   `fhir_base`, it could point OPA at a rogue FHIR server serving fake Consents and
   get `allow: true` — an authorization bypass. So the contract is strictly
-  *request + token in; boolean out*.
+  *request + token in; decision out*.
 - **Token (`bearerToken`):** the client's access token that the consumer is
   forwarding. For testing, mint one via the **Auth** folder and copy `accessToken`
   into `bearerToken`, or paste any token from your auth server. Its
   scope/org/context decide the outcome (OPA does **not** verify the signature,
   but it must carry the right claims). The `Decide - …` requests mirror the
-  gateway's real routes (Task search/create/update, ServiceRequest search, read by
-  id); the graph/consent ones (Task update, SR search, read by id) are
+  gateway's real routes (Task search/read/create/update, ServiceRequest search, read
+  by id); the graph/consent ones (Task read/update, SR search, read by id) are
   **data-dependent** (OPA fetches Consent/Task/SR), so bring the stack up and seed
   (`tests/scripts/seed.sh up`) for them to return `true`.
 

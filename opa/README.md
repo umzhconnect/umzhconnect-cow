@@ -137,10 +137,11 @@ forwards the request it is proxying + the client's bearer; it passes **no**
 `requests/README.md` for the full contract.
 
 ```
-POST https://opa.dev.umzhc.io.usz.ch/v1/data/umzh/authz/gateway/allow
+POST https://opa.dev.umzhc.io.usz.ch/v1/data/umzh/authz/gateway/decision
   { "input": { "request": { "method": "...", "path": "/fhir/...", "query": { },
                             "headers": { "authorization": "Bearer <token>" } } } }
-  # → { "result": true | false }
+  # → { "result": { "allow": true } }
+  # or { "result": { "allow": false, "status_code": 403 | 412 } }
 ```
 
 ⚠️ **The ingress deliberately publishes only `/v1/data/umzh/authz/gateway`** — not

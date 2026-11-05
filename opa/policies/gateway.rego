@@ -157,12 +157,10 @@ _well_formed if {
 # context graph) centric — every rule in main.rego carries its own scope and
 # identity conditions, so there is no coarse realm-role gate here.
 #
-# `default allow := false` makes the decision an EXPLICIT boolean: a denied query
-# returns {"result": false} rather than an undefined {} (which happens when the
-# rule body isn't satisfied — e.g. no bearer, or main.rego denied). External
-# callers (MuleSoft) can then check `result == false` instead of "result absent".
-# The APISIX gateway plugin treats false and absent the same, so this is inert
-# for the gateway.
+# `default allow := false` makes `allow` an EXPLICIT boolean: a denied query returns
+# {"result": false} rather than an undefined {} (which happens when the rule body
+# isn't satisfied — e.g. no bearer, or main.rego denied). Callers should query
+# `decision` below, which carries it as its `allow` field.
 default allow := false
 
 allow if {
@@ -180,7 +178,8 @@ status_code := 412 if {
 	data.umzh.authz.task_version_mismatch with input as _policy_input
 }
 
-# What APISIX queries: the whole package also holds the bearer and the request body.
+# What APISIX and external callers (MuleSoft) query: the whole package also holds
+# the bearer and the request body.
 decision := {"allow": true} if allow
 
 decision := {"allow": false, "status_code": status_code} if not allow

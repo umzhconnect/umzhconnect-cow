@@ -1,0 +1,37 @@
+meta {
+  name: Decide - Task read
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{opaUrl}}/v1/data/umzh/authz/gateway/decision
+  body: json
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "input": {
+      "request": {
+        "method": "GET",
+        "path": "/fhir/Task/task-e2e",
+        "query": {},
+        "headers": {
+          "authorization": "Bearer {{bearerToken}}"
+        }
+      }
+    }
+  }
+}
+
+docs {
+  May this caller read Task/task-e2e? Requires system/Task.r AND — this is
+  DATA-DEPENDENT — the stored Task's requester must equal the token's org. OPA
+  fetches the Task itself (from its configured fhir_base), so this needs the stack
+  up + the Task present. Response: { "result": { "allow": true } } or
+  { "result": { "allow": false, "status_code": 403 } }.
+}

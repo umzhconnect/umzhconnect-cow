@@ -5,7 +5,7 @@ meta {
 }
 
 post {
-  url: {{opaUrl}}/v1/data/umzh/authz/gateway/allow
+  url: {{opaUrl}}/v1/data/umzh/authz/gateway/decision
   body: json
 }
 
@@ -35,8 +35,8 @@ docs {
   DATA-DEPENDENT — the stored Task's requester must equal the token's org, if-match
   its current version, and the body may differ only by a change the Placer may
   make. OPA fetches the Task itself (from its configured fhir_base), so this needs
-  the stack up + the Task present. Response: { "result": true|false }.
+  the stack up + the Task present. Response: { "result": { "allow": true } } or
+  { "result": { "allow": false, "status_code": 403 } }.
 
-  After a false, send the same body to .../gateway/status_code: { "result": 412 }
-  means a missing or stale if-match.
+  A status_code of 412 means a missing or stale if-match.
 }

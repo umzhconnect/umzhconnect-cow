@@ -8,7 +8,7 @@ docs {
   How an external consumer (a gateway / integration platform, e.g. MuleSoft) asks
   OPA for an authorization decision.
 
-  **Endpoint:** `POST {{opaUrl}}/v1/data/umzh/authz/gateway/allow`
+  **Endpoint:** `POST {{opaUrl}}/v1/data/umzh/authz/gateway/decision`
 
   **You send** the FHIR request you are proxying + the client's bearer — nothing
   else:
@@ -22,7 +22,10 @@ docs {
   } } }
   ```
 
-  **You get** `{ "result": true }` (allow) or `{ "result": false }` (deny).
+  **You get** `{ "result": { "allow": true } }` (allow) or
+  `{ "result": { "allow": false, "status_code": 403 } }` (deny). `status_code` is
+  what to answer the client with: 412 for a Task update with a missing or stale
+  `If-Match`, otherwise 403.
 
   ## What OPA actually reads from your token
 
@@ -66,6 +69,6 @@ docs {
   Run the **Auth** folder (*Get token*) to mint one,
   then copy the resulting `accessToken` into the `bearerToken` env var — or paste
   any token from your auth server. Its scope / org / context decide the
-  outcome. The graph/consent requests (Task update, ServiceRequest search, read by
-  id) also need the stack up + seeded data (`tests/scripts/seed.sh up`).
+  outcome. The graph/consent requests (Task read, Task update, ServiceRequest search,
+  read by id) also need the stack up + seeded data (`tests/scripts/seed.sh up`).
 }
