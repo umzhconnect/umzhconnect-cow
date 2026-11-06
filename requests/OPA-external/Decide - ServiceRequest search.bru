@@ -5,7 +5,7 @@ meta {
 }
 
 post {
-  url: {{opaUrl}}/v1/data/umzh/authz/gateway/allow
+  url: {{opaUrl}}/v1/data/umzh/authz/gateway/decision
   body: json
 }
 
@@ -34,5 +34,7 @@ docs {
   May this caller search ServiceRequest?_id=sr-e2e? OPA derives the target id from
   query._id, then applies the context + Consent graph rule (system/
   ServiceRequest.s + an active Consent naming the caller for the sr-e2e context).
-  DATA-DEPENDENT (OPA fetches Consent/ServiceRequest). Response: { "result": true|false }.
+  DATA-DEPENDENT (OPA fetches Consent/ServiceRequest). Response:
+  { "result": { "allow": true } } or
+  { "result": { "allow": false, "status_code": 403 } }.
 }
