@@ -7,9 +7,9 @@ environment, and go.
 ## Layout
 
 - **Health** — gateway `/healthz` + `/jwks.json` (no auth).
-- **Auth** — the two-step L2 token flow:
-  1. *Sign assertion* → the key custodian mints a `private_key_jwt` (saved to `assertion`).
-  2. *Exchange for token* → swap it at the auth server for an access token (saved to `accessToken`).
+- **Auth** — the L2 token flow in one call:
+  - *Get token* → the key custodian signs the `private_key_jwt` assertion **and**
+    exchanges it at the auth server, returning the access token (saved to `accessToken`).
 - **Gateway** — authenticated FHIR: list / create / update Task, search ServiceRequest.
   These read `{{accessToken}}`, so run the **Auth** folder first.
 - **OPA-external** — **the external decision contract** (how any external consumer
@@ -82,18 +82,16 @@ Bruno), and it's a dev convenience only.
 
 Points at the default host ports (gateway `:9081`, custodian `:9087`, OPA `:9181`,
 auth server `:8180`), the `orgA` test org identity, `opaFhirBase` (OPA's
-in-cluster FHIR address, used by the OPA-core folder only), `clientId:
-fulfiller-client-l2`, and `orgRef` set to the sandbox fulfiller org. Adjust these
-to your ecosystem — `clientId` must be a client the auth server knows whose
-`jwks.url` resolves to this node's `/jwks.json`, and `orgRef` must equal the
-token's `organization_reference`.
+in-cluster FHIR address, used by the OPA-core folder only), and `orgRef` set to
+the sandbox fulfiller org. Adjust these to your ecosystem — `orgRef` must equal
+the token's `organization_reference`. The client id is not set here: the
+custodian always uses its own `CLIENT_ID` (`L2_CLIENT_ID` in `.env`).
 
-`assertion`, `accessToken`, `taskId`, `taskVersion`, and `bearerToken` are secret vars — filled at
+`accessToken`, `taskId`, `taskVersion`, and `bearerToken` are secret vars — filled at
 runtime (or pasted) — leave them blank in the file.
 
 ## Typical flow
 
-Auth › *1 Sign assertion* → Auth › *2 Exchange for token* → Gateway › *Create
-Task* → *List Tasks* → *Update Task*.
+Auth › *Get token* → Gateway › *Create Task* → *List Tasks* → *Update Task*.
 
 For an automated, assert-checked version of these calls, see `../tests`.
