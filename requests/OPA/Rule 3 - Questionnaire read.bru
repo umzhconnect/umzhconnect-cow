@@ -17,16 +17,10 @@ body:json {
   {
     "input": {
       "method": "GET",
-      "resource_type": "Questionnaire",
-      "resource_id": "q1",
       "path": "/fhir/Questionnaire/q1",
-      "read_action": "r",
-      "token": {
-        "organization_reference": "{{orgA}}",
-        "scope": "system/Questionnaire.r",
-        "contexts": []
-      },
-      "fhir_base": "{{opaFhirBase}}"
+      "organization_reference": "{{orgA}}",
+      "scope": "system/Questionnaire.r",
+      "context": ""
     }
   }
 }

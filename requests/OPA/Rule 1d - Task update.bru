@@ -17,10 +17,8 @@ body:json {
   {
     "input": {
       "method": "PUT",
-      "resource_type": "Task",
-      "resource_id": "task-e2e",
       "path": "/fhir/Task/task-e2e",
-      "if_match": "W/\"1\"",
+      "header_if_match": "W/\"1\"",
       "body": {
         "resourceType": "Task",
         "id": "task-e2e",
@@ -28,12 +26,9 @@ body:json {
         "intent": "order",
         "requester": { "reference": "{{orgA}}" }
       },
-      "token": {
-        "organization_reference": "{{orgA}}",
-        "scope": "system/Task.u",
-        "contexts": []
-      },
-      "fhir_base": "{{opaFhirBase}}"
+      "organization_reference": "{{orgA}}",
+      "scope": "system/Task.u",
+      "context": ""
     }
   }
 }

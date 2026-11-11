@@ -181,13 +181,95 @@ HTTP 400
 [Asserts]
 jsonpath "$.issue[0].diagnostics" contains "unsupported search parameter: owner"
 
+# --- Write bodies: capability-guard checks them before OPA and HAPI ----------
+
+# Only application/fhir+json → 415.
+POST {{gateway_url}}/fhir/Task
+Authorization: Bearer {{token}}
+Content-Type: application/json
+```
+{"resourceType":"Task","status":"requested","intent":"order","requester":{"reference":"{{our_org}}"}}
+```
+HTTP 415
+[Asserts]
+jsonpath "$.issue[0].diagnostics" contains "application/fhir+json"
+
+# Not JSON → 400.
+POST {{gateway_url}}/fhir/Task
+Authorization: Bearer {{token}}
+Content-Type: application/fhir+json
+```
+{"resourceType":"Task",
+```
+HTTP 400
+[Asserts]
+jsonpath "$.issue[0].diagnostics" contains "not a JSON object"
+
+# JSON, but not one object → 400.
+POST {{gateway_url}}/fhir/Task
+Authorization: Bearer {{token}}
+Content-Type: application/fhir+json
+```
+[{"resourceType":"Task"}]
+```
+HTTP 400
+[Asserts]
+jsonpath "$.issue[0].diagnostics" contains "not a JSON object"
+
+# The same key twice: OPA and HAPI could each keep a different requester → 400.
+POST {{gateway_url}}/fhir/Task
+Authorization: Bearer {{token}}
+Content-Type: application/fhir+json
+```
+{"resourceType":"Task","status":"requested","intent":"order","requester":{"reference":"{{our_org}}"},"requester":{"reference":"http://localhost:9084/fhir/Organization/SomeoneElse"}}
+```
+HTTP 400
+[Asserts]
+jsonpath "$.issue[0].diagnostics" contains "duplicate key in request body: requester"
+
+# Disguised with an escape: compared decoded → 400.
+POST {{gateway_url}}/fhir/Task
+Authorization: Bearer {{token}}
+Content-Type: application/fhir+json
+```
+{"resourceType":"Task","status":"requested","intent":"order","requester":{"reference":"{{our_org}}"},"requester":{"reference":"http://localhost:9084/fhir/Organization/SomeoneElse"}}
+```
+HTTP 400
+[Asserts]
+jsonpath "$.issue[0].diagnostics" contains "duplicate key in request body: requester"
+
+# Nested: twice in the same inner object → 400.
+POST {{gateway_url}}/fhir/Task
+Authorization: Bearer {{token}}
+Content-Type: application/fhir+json
+```
+{"resourceType":"Task","status":"requested","intent":"order","requester":{"reference":"{{our_org}}","reference":"http://localhost:9084/fhir/Organization/SomeoneElse"}}
+```
+HTTP 400
+[Asserts]
+jsonpath "$.issue[0].diagnostics" contains "duplicate key in request body: reference"
+
+# The same key in different objects is fine, and a charset parameter is allowed.
+POST {{gateway_url}}/fhir/Task
+Authorization: Bearer {{token}}
+Content-Type: application/fhir+json; charset=utf-8
+```
+{"resourceType":"Task","status":"requested","intent":"order","identifier":[{"system":"urn:umzhc:test","value":"e2e"}],"requester":{"reference":"{{our_org}}"},"owner":{"reference":"{{our_org}}"}}
+```
+HTTP 201
+
+# _include needs _id, even a value that needs no context → OPA 403.
+GET {{gateway_url}}/fhir/Task?_include=Task:output-value-canonical
+Authorization: Bearer {{token}}
+HTTP 403
+
 # Task outputs are context-gated: this token has no Task context, so OPA denies
 # the _include (403) before HAPI is asked.
 GET {{gateway_url}}/fhir/Task?_id={{task_id}}&_include=Task:output-value-reference
 Authorization: Bearer {{token}}
 HTTP 403
 
-# A Task someone else requested. Conditional create would return it → 403.
+# A Task someone else requested. Conditional create would return it → capability-guard 400.
 POST {{proxy_url}}/fhir/Task
 Content-Type: application/fhir+json
 {
@@ -214,7 +296,30 @@ Content-Type: application/fhir+json
   "requester": { "reference": "{{our_org}}" },
   "owner": { "reference": "{{our_org}}" }
 }
-HTTP 403
+HTTP 400
+[Asserts]
+jsonpath "$.issue[0].diagnostics" contains "If-None-Exist"
+
+# A write anywhere but POST /Task or PUT /Task/<id>: no route.
+PUT {{gateway_url}}/fhir/Task/{{task_id}}/_history/1
+Authorization: Bearer {{token}}
+If-Match: W/"1"
+Content-Type: application/fhir+json
+{ "resourceType": "Task", "id": "{{task_id}}", "status": "cancelled", "intent": "order" }
+HTTP 404
+
+PUT {{gateway_url}}/fhir/Task?_id={{task_id}}
+Authorization: Bearer {{token}}
+If-Match: W/"1"
+Content-Type: application/fhir+json
+{ "resourceType": "Task", "id": "{{task_id}}", "status": "cancelled", "intent": "order" }
+HTTP 404
+
+POST {{gateway_url}}/fhir/Task/{{task_id}}
+Authorization: Bearer {{token}}
+Content-Type: application/fhir+json
+{ "resourceType": "Task", "status": "requested", "intent": "order" }
+HTTP 404
 
 # PUT doesn't create: an unknown id → 403.
 PUT {{gateway_url}}/fhir/Task/not-a-task

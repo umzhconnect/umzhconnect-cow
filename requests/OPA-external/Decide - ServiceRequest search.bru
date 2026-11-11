@@ -19,9 +19,7 @@ body:json {
       "request": {
         "method": "GET",
         "path": "/fhir/ServiceRequest",
-        "query": {
-          "_id": "sr-e2e"
-        },
+        "query_string": "_id=sr-e2e",
         "headers": {
           "authorization": "Bearer {{bearerToken}}"
         }
@@ -31,8 +29,8 @@ body:json {
 }
 
 docs {
-  May this caller search ServiceRequest?_id=sr-e2e? OPA derives the target id from
-  query._id, then applies the context + Consent graph rule (system/
+  May this caller search ServiceRequest?_id=sr-e2e? OPA parses the raw query_string
+  and derives the target id from its _id, then applies the context + Consent graph rule (system/
   ServiceRequest.s + an active Consent naming the caller for the sr-e2e context).
   DATA-DEPENDENT (OPA fetches Consent/ServiceRequest). Response:
   { "result": { "allow": true } } or

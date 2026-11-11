@@ -1,0 +1,5 @@
+{
+  "config": {
+    "fhir_base": "http://hapi/fhir/clinical-orders"
+  }
+}

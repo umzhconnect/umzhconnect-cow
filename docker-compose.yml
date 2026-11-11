@@ -69,13 +69,13 @@ services:
     platform: linux/amd64
     container_name: party-opa
     environment:
-      # OPTIONAL: override fhir_base (read via opa.runtime().env in gateway.rego)
+      # OPTIONAL: override fhir_base (read via opa.runtime().env in main.rego)
       # to point this same policy/config bundle at a DIFFERENT (e.g. external) FHIR
       # backend without editing opa-config.json. Empty ⇒ opa-config.json wins.
       FHIR_BASE: ${OPA_FHIR_BASE:-}
       # OPTIONAL: full Authorization header OPA sends to the FHIR server on its
       # own Consent/Task/ServiceRequest fetches (e.g. "Basic <base64(user:pass)>").
-      # Read via opa.runtime().env in gateway.rego; empty = no header (default).
+      # Read via opa.runtime().env in main.rego; empty = no header (default).
       # A secret — not baked into opa-config.json; in k8s inject from a Secret.
       FHIR_BACKEND_AUTHORIZATION: ${FHIR_BACKEND_AUTHORIZATION:-}
     command:

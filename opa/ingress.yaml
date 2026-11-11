@@ -8,7 +8,8 @@
 # gateway ADAPTER decision entrypoint — /v1/data/umzh/authz/gateway — so external
 # consumers can POST a decision query (request + bearer) but cannot reach policy/
 # data management, other packages, OR the core /v1/data/umzh/authz/allow (which
-# trusts a caller-supplied fhir_base — see gateway.rego / requests/README).
+# trusts its input's token: a caller could claim any org, scope or context — see
+# requests/README).
 #
 # This is EDGE scoping, not authentication. OPA itself still trusts every caller
 # that reaches it, and even under this prefix an HTTP verb other than POST could
@@ -35,7 +36,7 @@ spec:
         paths:
           # Adapter decision entrypoint ONLY: POST /v1/data/umzh/authz/gateway/decision
           # (request + bearer in → allow + status_code out). Deliberately NOT the core
-          # /v1/data/umzh/authz/allow (caller-controlled fhir_base) nor bare
+          # /v1/data/umzh/authz/allow (caller-supplied token claims) nor bare
           # /v1/data. Widen only if a consumer genuinely needs more.
           - pathType: Prefix
             path: '/v1/data/umzh/authz/gateway'
