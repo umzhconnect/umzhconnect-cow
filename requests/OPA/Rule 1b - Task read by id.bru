@@ -17,16 +17,10 @@ body:json {
   {
     "input": {
       "method": "GET",
-      "resource_type": "Task",
-      "resource_id": "task-e2e",
       "path": "/fhir/Task/task-e2e",
-      "read_action": "r",
-      "token": {
-        "organization_reference": "{{orgA}}",
-        "scope": "system/Task.r",
-        "contexts": []
-      },
-      "fhir_base": "{{opaFhirBase}}"
+      "organization_reference": "{{orgA}}",
+      "scope": "system/Task.r",
+      "context": ""
     }
   }
 }

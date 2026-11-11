@@ -106,9 +106,17 @@ routes:
       type: roundrobin
 
   # ─── Task update — capability-guard (no params, forwards body) + OPA (Rule 1d) ─
+  # Matches /fhir/Task/<id> only, with <id> in FHIR id syntax. OPA checks neither:
+  # HAPI ignores If-Match on a conditional PUT /Task?_id=<id> (no route here),
+  # nothing below a resource is a write target, and OPA builds its fetch URL from
+  # the id.
   - id: ext-task-update
     uri: /fhir/Task/*
     methods: [PUT]
+    vars:
+      - - "uri"
+        - "~~"
+        - "^/fhir/Task/[A-Za-z0-9.-]{1,64}$"
     priority: 10
     plugins:
       openid-connect:
@@ -132,8 +140,9 @@ routes:
   # ─── FHIR read by ID — capability-guard (no params) + OPA consent gate ─
   # The types with a read interaction in the IG CapabilityStatement: those of
   # ext-readonly-search plus Questionnaire, ServiceRequest and Task. Matches
-  # /fhir/<type>/<id> (two path segments). One-segment paths are handled by the
-  # search routes.
+  # /fhir/<type>/<id> (two path segments), with <id> in FHIR id syntax: OPA builds
+  # its fetch URL from the id and doesn't check it. One-segment paths are handled
+  # by the search routes.
   - id: ext-fhir-read
     uris:
       - /fhir/AllergyIntolerance/*
@@ -160,7 +169,7 @@ routes:
     vars:
       - - "uri"
         - "~~"
-        - "^/fhir/[^/]+/[^/]+$"
+        - "^/fhir/[^/]+/[A-Za-z0-9.-]{1,64}$"
     priority: 5
     plugins:
       openid-connect:

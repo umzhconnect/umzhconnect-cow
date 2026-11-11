@@ -5,12 +5,12 @@
 # with `with http.send as <fn>` so the suite is fully hermetic (no stack).
 #
 #   opa test opa/policies tests/opa            # or tests/scripts/opa-test.sh
+#
+# tests/opa/data.json stands in for opa-config.json: it sets data.config.fhir_base.
 # =============================================================================
 package umzh.authz_test
 
 import rego.v1
-
-fhir_base := "http://hapi/fhir/clinical-orders"
 
 org_a := "https://reg.example/Organization/A"
 org_x := "https://reg.example/Organization/X"
@@ -181,56 +181,68 @@ mock_not_found(_) := {"status_code": 404, "body": {}}
 
 # --- input builders ----------------------------------------------------------
 
+# A read of <rtype>/<rid>, or with rid "" a search of <rtype>: the path says which.
 req_in(method, rtype, rid, scope, org, ctx) := {
 	"method": method,
-	"resource_type": rtype,
-	"resource_id": rid,
-	"path": sprintf("/fhir/%s/%s", [rtype, rid]),
-	"read_action": "r",
-	"token": {"organization_reference": org, "scope": scope, "contexts": ctx},
-	"fhir_base": fhir_base,
+	"path": type_path(rtype, rid),
+	"query_params": [],
+	"organization_reference": org,
+	"scope": scope,
+	"context": ctx,
 }
 
-# A Task search carrying _include values.
-task_include_in(rid, includes, ctx) := object.union(
-	req_in("GET", "Task", rid, "system/Task.rs", org_a, ctx),
-	{"includes": includes, "read_action": "s"},
-)
+type_path(rtype, "") := sprintf("/fhir/%s", [rtype])
 
-# A search by _id.
-search_in(rtype, rid, scope, ctx) := object.union(req_in("GET", rtype, rid, scope, org_a, ctx), {"read_action": "s"})
+type_path(rtype, rid) := sprintf("/fhir/%s/%s", [rtype, rid]) if rid != ""
 
-# A Task create with the given body.
-create_in(body) := object.union(req_in("POST", "Task", "", "system/Task.c", org_a, []), {"body": body})
+# The query parameters of a search: _id when rid isn't "", then the extras.
+search_params(rid, extra) := array.concat([{"_id": rid} | rid != ""], extra)
 
-# An update of Task/t1 with the given body, naming version 3.
-update_in(body) := object.union(req_in("PUT", "Task", "t1", "system/Task.u", org_a, []), {
-	"body": body,
-	"if_match": `W/"3"`,
+# GET /fhir/Task?_id=<rid>&_include=..., or without _id when rid is "".
+task_include_in(rid, includes, ctx) := object.union(req_in("GET", "Task", rid, "system/Task.rs", org_a, ctx), {
+	"path": "/fhir/Task",
+	"query_params": search_params(rid, [{"_include": value} | some value in includes]),
 })
 
-sr_ctx := ["ServiceRequest/sr1"]
+# GET /fhir/<rtype>?_id=<rid>.
+search_in(rtype, rid, scope, ctx) := object.union(req_in("GET", rtype, rid, scope, org_a, ctx), {
+	"path": sprintf("/fhir/%s", [rtype]),
+	"query_params": search_params(rid, []),
+})
 
-task_ctx := ["Task/t1"]
+# A Task create with the given body.
+create_in(body) := object.union(req_in("POST", "Task", "", "system/Task.c", org_a, ""), {"body": body})
+
+# An update of Task/t1 with the given body, naming version 3.
+update_in(body) := object.union(req_in("PUT", "Task", "t1", "system/Task.u", org_a, ""), {
+	"body": body,
+	"header_if_match": `W/"3"`,
+})
+
+sr_ctx := "ServiceRequest/sr1"
+
+task_ctx := "Task/t1"
 
 # ============================================================================
 # Rule 1a — Task search
 # ============================================================================
 test_1a_search_allowed if {
-	data.umzh.authz.allow with input as req_in("GET", "Task", "", "system/Task.s", org_a, [])
+	data.umzh.authz.allow with input as req_in("GET", "Task", "", "system/Task.s", org_a, "")
 }
 
 test_1a_denied_without_scope if {
-	not data.umzh.authz.allow with input as req_in("GET", "Task", "", "system/Patient.r", org_a, [])
+	not data.umzh.authz.allow with input as req_in("GET", "Task", "", "system/Patient.r", org_a, "")
 }
 
 test_1a_denied_empty_org if {
-	not data.umzh.authz.allow with input as req_in("GET", "Task", "", "system/Task.s", "", [])
+	not data.umzh.authz.allow with input as req_in("GET", "Task", "", "system/Task.s", "", "")
 }
 
-# Questionnaires are not context-gated, so this _include needs no _id or context.
-test_1a_canonical_include_allowed if {
-	data.umzh.authz.allow with input as task_include_in("", ["Task:output-value-canonical"], [])
+# _include needs _id, even a value that needs no context.
+test_1a_include_denied_without_id if {
+	every includes in [["Task:output-value-canonical"], ["DiagnosticReport:result"]] {
+		not data.umzh.authz.allow with input as task_include_in("", includes, "")
+	}
 }
 
 # Without _id there is no Task to bind a context to, even if the token has one.
@@ -240,19 +252,19 @@ test_1a_output_include_denied if {
 }
 
 test_1a_denied_when_any_include_needs_context if {
-	not data.umzh.authz.allow with input as task_include_in("", ["Task:output-value-canonical", "Task:output-value-reference"], [])
+	not data.umzh.authz.allow with input as task_include_in("", ["Task:output-value-canonical", "Task:output-value-reference"], "")
 }
 
 # ============================================================================
 # Rule 1b — Task read by id (requester must equal caller)
 # ============================================================================
 test_1b_read_allowed_requester_match if {
-	data.umzh.authz.allow with input as req_in("GET", "Task", "t1", "system/Task.r", org_a, [])
+	data.umzh.authz.allow with input as req_in("GET", "Task", "t1", "system/Task.r", org_a, "")
 		with http.send as mock_task_a
 }
 
 test_1b_denied_requester_mismatch if {
-	not data.umzh.authz.allow with input as req_in("GET", "Task", "t1", "system/Task.r", org_a, [])
+	not data.umzh.authz.allow with input as req_in("GET", "Task", "t1", "system/Task.r", org_a, "")
 		with http.send as mock_task_x
 }
 
@@ -263,19 +275,82 @@ test_1b_output_include_allowed_with_context if {
 }
 
 test_1b_output_include_denied_without_context if {
-	not data.umzh.authz.allow with input as task_include_in("t1", ["Task:output-value-reference"], [])
+	not data.umzh.authz.allow with input as task_include_in("t1", ["Task:output-value-reference"], "")
 		with http.send as mock_task_a
 }
 
 test_1b_output_include_denied_for_other_task_context if {
-	not data.umzh.authz.allow with input as task_include_in("t1", ["Task:output-value-reference"], ["Task/t2"])
+	not data.umzh.authz.allow with input as task_include_in("t1", ["Task:output-value-reference"], "Task/t2")
 		with http.send as mock_task_a
 }
 
+# Questionnaires are not context-gated: with _id, this _include needs no context.
+test_1b_canonical_include_allowed_without_context if {
+	data.umzh.authz.allow with input as task_include_in("t1", ["Task:output-value-canonical"], "")
+		with http.send as mock_task_a
+}
+
+# An _id is a search parameter: a read by id may not include, even with the context.
+test_1b_include_denied_on_read if {
+	not data.umzh.authz.allow with input as object.union(
+		task_include_in("t1", ["Task:output-value-reference"], task_ctx),
+		{"path": "/fhir/Task/t1"},
+	)
+		with http.send as mock_task_a
+}
+
+# The _id rule holds for every type, not only Task.
+test_3_include_denied_without_id if {
+	not data.umzh.authz.allow with input as object.union(
+		req_in("GET", "Questionnaire", "", "system/Questionnaire.s", org_a, ""),
+		{"query_params": [{"_include": "Questionnaire:x"}]},
+	)
+}
+
 # ============================================================================
-# Optional backend auth — OPA attaches input.fhir_authorization to its FHIR
-# fetches when set, and nothing when unset. Mocks assert on req.headers.
+# Backend configuration — fhir_base and the optional backend credential come
+# from OPA's own data document and environment, never from the input.
 # ============================================================================
+
+# Default: no FHIR_BASE env → fhir_base comes from the opa-config.json data doc.
+test_fhir_base_from_data_config if {
+	data.umzh.authz.fhir_base == "http://cfg/fhir/clinical-orders" with opa.runtime as {"env": {}}
+		with data.config as {"fhir_base": "http://cfg/fhir/clinical-orders"}
+}
+
+# A non-empty FHIR_BASE env overrides the data document (external-backend case).
+test_fhir_base_env_override_wins if {
+	data.umzh.authz.fhir_base == "https://external/fhir" with opa.runtime as {"env": {"FHIR_BASE": "https://external/fhir"}}
+		with data.config as {"fhir_base": "http://cfg/fhir/clinical-orders"}
+}
+
+# An empty FHIR_BASE env is ignored → falls back to the data document.
+test_fhir_base_empty_env_falls_back if {
+	data.umzh.authz.fhir_base == "http://cfg/fhir/clinical-orders" with opa.runtime as {"env": {"FHIR_BASE": ""}}
+		with data.config as {"fhir_base": "http://cfg/fhir/clinical-orders"}
+}
+
+# A caller can't choose the FHIR server: input.fhir_base is ignored.
+test_input_fhir_base_ignored if {
+	data.umzh.authz.allow with input as object.union(
+		req_in("GET", "Task", "t1", "system/Task.r", org_a, ""),
+		{"fhir_base": "https://rogue.example/fhir"},
+	)
+		with http.send as mock_task_from_config
+}
+
+mock_task_from_config(req) := {"status_code": 200, "body": {"requester": {"reference": org_a}}} if {
+	startswith(req.url, "http://hapi/fhir/clinical-orders/Task/")
+}
+
+# No FHIR server configured → nothing is allowed, not even a rule that fetches nothing.
+test_denied_without_fhir_base if {
+	not data.umzh.authz.allow with input as req_in("GET", "Task", "", "system/Task.s", org_a, "")
+		with opa.runtime as {"env": {}}
+		with data.config as {}
+}
+
+# The optional backend credential. Mocks assert on req.headers.
 
 # Task-fetch mock that ALSO requires the configured Authorization header.
 mock_task_a_auth(req) := {"status_code": 200, "body": {"requester": {"reference": org_a}}} if {
@@ -290,16 +365,36 @@ mock_task_a_noauth(req) := {"status_code": 200, "body": {"requester": {"referenc
 }
 
 test_backend_auth_attached_when_set if {
-	data.umzh.authz.allow with input as object.union(
-		req_in("GET", "Task", "t1", "system/Task.r", org_a, []),
-		{"fhir_authorization": "Basic dGVzdDp0ZXN0"},
-	)
+	data.umzh.authz.allow with input as req_in("GET", "Task", "t1", "system/Task.r", org_a, "")
+		with opa.runtime as {"env": {"FHIR_BACKEND_AUTHORIZATION": "Basic dGVzdDp0ZXN0"}}
 		with http.send as mock_task_a_auth
 }
 
 test_backend_auth_absent_when_unset if {
-	data.umzh.authz.allow with input as req_in("GET", "Task", "t1", "system/Task.r", org_a, [])
+	every env in [{}, {"FHIR_BACKEND_AUTHORIZATION": ""}] {
+		data.umzh.authz.allow with input as req_in("GET", "Task", "t1", "system/Task.r", org_a, "")
+			with opa.runtime as {"env": env}
+			with http.send as mock_task_a_noauth
+	}
+}
+
+# The input can't set the credential either.
+test_backend_auth_not_from_input if {
+	data.umzh.authz.allow with input as object.union(
+		req_in("GET", "Task", "t1", "system/Task.r", org_a, ""),
+		{"fhir_authorization": "Basic dGVzdDp0ZXN0"},
+	)
+		with opa.runtime as {"env": {}}
 		with http.send as mock_task_a_noauth
+}
+
+# No rule in either package holds the credential, so OPA's data API can't return
+# it: GET /v1/data/umzh/authz evaluates every rule, but no function.
+test_backend_auth_in_no_rule if {
+	doc := data.umzh.authz with input as req_in("GET", "Task", "t1", "system/Task.r", org_a, "")
+		with opa.runtime as {"env": {"FHIR_BACKEND_AUTHORIZATION": "Basic c2VjcmV0"}}
+		with http.send as mock_task_a_auth
+	not contains(json.marshal(doc), "c2VjcmV0")
 }
 
 # ============================================================================
@@ -310,7 +405,7 @@ test_1c_create_allowed if {
 }
 
 test_1c_denied_without_scope if {
-	not data.umzh.authz.allow with input as object.union(create_in(new_task), {"token": {"scope": "system/Task.r"}})
+	not data.umzh.authz.allow with input as object.union(create_in(new_task), {"scope": "system/Task.r"})
 }
 
 test_1c_denied_other_requester if {
@@ -320,7 +415,7 @@ test_1c_denied_other_requester if {
 test_1c_denied_empty_org if {
 	not data.umzh.authz.allow with input as object.union(
 		create_in(object.union(new_task, {"requester": {"reference": ""}})),
-		{"token": {"organization_reference": ""}},
+		{"organization_reference": ""},
 	)
 }
 
@@ -346,7 +441,7 @@ test_1d_denied_other_requester if {
 }
 
 test_1d_denied_without_scope if {
-	not data.umzh.authz.allow with input as object.union(update_in(cancelled_task), {"token": {"scope": "system/Task.r"}})
+	not data.umzh.authz.allow with input as object.union(update_in(cancelled_task), {"scope": "system/Task.r"})
 		with http.send as mock_requested
 }
 
@@ -358,7 +453,7 @@ test_1d_denied_unknown_id if {
 # --- If-Match: a stale or missing version is reported, but only to the requester
 test_1d_denied_wrong_version if {
 	every if_match in [`W/"2"`, ""] {
-		wrong := object.union(update_in(cancelled_task), {"if_match": if_match})
+		wrong := object.union(update_in(cancelled_task), {"header_if_match": if_match})
 		not data.umzh.authz.allow with input as wrong
 			with http.send as mock_requested
 		data.umzh.authz.task_version_mismatch with input as wrong
@@ -367,7 +462,7 @@ test_1d_denied_wrong_version if {
 }
 
 test_1d_version_mismatch_hidden_from_others if {
-	not data.umzh.authz.task_version_mismatch with input as object.union(update_in(stored_task), {"if_match": `W/"2"`})
+	not data.umzh.authz.task_version_mismatch with input as object.union(update_in(stored_task), {"header_if_match": `W/"2"`})
 		with http.send as mock_other_requester
 }
 
@@ -474,7 +569,7 @@ test_1d_answer_denied_with_other_change if {
 # Rule 3 — Questionnaire
 # ============================================================================
 test_3_questionnaire_read if {
-	data.umzh.authz.allow with input as req_in("GET", "Questionnaire", "q1", "system/Questionnaire.r", org_a, [])
+	data.umzh.authz.allow with input as req_in("GET", "Questionnaire", "q1", "system/Questionnaire.r", org_a, "")
 }
 
 # ============================================================================
@@ -596,7 +691,7 @@ test_4b_task_input_not_in_graph if {
 # Rule 5 — metadata (always)
 # ============================================================================
 test_5_metadata_allowed if {
-	data.umzh.authz.allow with input as {"method": "GET", "path": "/fhir/metadata", "resource_type": "", "resource_id": "", "token": {"organization_reference": "", "scope": "", "contexts": []}, "fhir_base": fhir_base}
+	data.umzh.authz.allow with input as {"method": "GET", "path": "/fhir/metadata", "query_params": [], "organization_reference": "", "scope": "", "context": ""}
 }
 
 # ============================================================================
@@ -605,52 +700,88 @@ test_5_metadata_allowed if {
 
 # One combined scope (system/Task.crus) satisfies every single-action Task check.
 test_combined_scope_task_search if {
-	data.umzh.authz.allow with input as req_in("GET", "Task", "", "system/Task.crus", org_a, [])
+	data.umzh.authz.allow with input as req_in("GET", "Task", "", "system/Task.crus", org_a, "")
 }
 
 test_combined_scope_task_create if {
-	data.umzh.authz.allow with input as object.union(create_in(new_task), {"token": {"scope": "system/Task.crus"}})
+	data.umzh.authz.allow with input as object.union(create_in(new_task), {"scope": "system/Task.crus"})
 }
 
 # Wildcard resource scopes are NOT supported: `system/*.r` must not grant a read
 # on a concrete type (has_smart_scope matches the resource literally).
 test_wildcard_scope_denied if {
-	not data.umzh.authz.allow with input as req_in("GET", "Questionnaire", "q1", "system/*.r", org_a, [])
+	not data.umzh.authz.allow with input as req_in("GET", "Questionnaire", "q1", "system/*.r", org_a, "")
 }
 
 test_wildcard_scope_denied_task if {
-	not data.umzh.authz.allow with input as req_in("GET", "Task", "", "system/*.crus", org_a, [])
+	not data.umzh.authz.allow with input as req_in("GET", "Task", "", "system/*.crus", org_a, "")
 }
 
 # ============================================================================
 # Cross-cutting — a resource read with no context/consent is denied
 # ============================================================================
 test_uncontexted_read_denied if {
-	not data.umzh.authz.allow with input as req_in("GET", "Patient", "p1", "system/Patient.r", org_a, [])
+	not data.umzh.authz.allow with input as req_in("GET", "Patient", "p1", "system/Patient.r", org_a, "")
 }
 
 test_uncontexted_directory_read_denied if {
-	not data.umzh.authz.allow with input as req_in("GET", "Organization", "o1", "system/Organization.r", org_a, [])
+	not data.umzh.authz.allow with input as req_in("GET", "Organization", "o1", "system/Organization.r", org_a, "")
 }
 
 # ============================================================================
-# Cross-cutting — a token carries exactly one context
+# Cross-cutting — a token carries exactly one context. The adapter sends "" for
+# none or several (adapter_test.rego); a context that isn't a plain reference to
+# a ServiceRequest or Task is denied too.
 # ============================================================================
-test_4_denied_with_two_contexts if {
-	not data.umzh.authz.allow with input as req_in("GET", "Patient", "p1", "system/Patient.r", org_a, ["ServiceRequest/sr1", "ServiceRequest/sr2"])
-		with http.send as mock_sr_ok
+test_4_denied_without_usable_context if {
+	every ctx in ["", "ServiceRequest/sr1/_history/1", "Patient/p1"] {
+		not data.umzh.authz.allow with input as req_in("GET", "Patient", "p1", "system/Patient.r", org_a, ctx)
+			with http.send as mock_sr_ok
+	}
+}
+
+# query_params is optional: no entry means no _include.
+# query_params is optional and defaults to [].
+test_query_params_default_empty if {
+	data.umzh.authz.allow with input as object.remove(req_in("GET", "Task", "", "system/Task.s", org_a, ""), ["query_params"])
+}
+
+# null is the adapter's "couldn't parse": a GET search depends on its query
+# parameters, so it's denied; a read names its resource in the path, and a write's
+# query decides nothing, so they're still decided.
+test_null_query_params_denies_only_get_search if {
+	not data.umzh.authz.allow with input as object.union(req_in("GET", "Task", "", "system/Task.s", org_a, ""), {"query_params": null})
+	data.umzh.authz.allow with input as object.union(req_in("GET", "Task", "t1", "system/Task.r", org_a, ""), {"query_params": null})
+		with http.send as mock_task_a
+	data.umzh.authz.allow with input as object.union(create_in(new_task), {"query_params": null})
+}
+
+# query_params must be a list of {name: value} entries.
+test_get_search_query_params_not_a_list_denied if {
+	every query_params in [{"_id": "t1"}, "_id=t1", null, ["_id=t1"]] {
+		not data.umzh.authz.allow with input as object.union(search_in("Task", "t1", "system/Task.s", ""), {"query_params": query_params})
+			with http.send as mock_task_a
+	}
+}
+
+# A repeated _id is ANDed by the FHIR server; OPA won't pick one of them.
+test_get_search_with_two_ids_denied if {
+	data.umzh.authz.allow with input as search_in("Task", "t1", "system/Task.s", "")
+		with http.send as mock_task_a
+	not data.umzh.authz.allow with input as object.union(search_in("Task", "t1", "system/Task.s", ""), {"query_params": [{"_id": "t1"}, {"_id": "t2"}]})
+		with http.send as mock_task_a
 }
 
 # ============================================================================
 # Cross-cutting — a search needs s
 # ============================================================================
 test_1b_search_denied_with_r_only if {
-	not data.umzh.authz.allow with input as search_in("Task", "t1", "system/Task.r", [])
+	not data.umzh.authz.allow with input as search_in("Task", "t1", "system/Task.r", "")
 		with http.send as mock_task_a
 }
 
 test_3_search_denied_with_r_only if {
-	not data.umzh.authz.allow with input as search_in("Questionnaire", "", "system/Questionnaire.r", [])
+	not data.umzh.authz.allow with input as search_in("Questionnaire", "", "system/Questionnaire.r", "")
 }
 
 test_4_search_denied_with_r_only if {
@@ -661,4 +792,70 @@ test_4_search_denied_with_r_only if {
 test_4b_search_denied_with_r_only if {
 	not data.umzh.authz.allow with input as search_in("DocumentReference", "d1", "system/DocumentReference.r", task_ctx)
 		with http.send as mock_task_ctx_ok
+}
+
+# ============================================================================
+# read vs search — from the path: method and resource_id can't tell them apart
+# ============================================================================
+test_read_action_from_path if {
+	data.umzh.authz.read_action == "r" with input as {"method": "GET", "path": "/fhir/Task/t1"}
+	data.umzh.authz.read_action == "s" with input as {"method": "GET", "path": "/fhir/Task"}
+	data.umzh.authz.read_action == "s" with input as {"method": "GET", "path": "/fhir/metadata"}
+	# Only a GET is a read or a search.
+	not data.umzh.authz.read_action with input as {"method": "POST", "path": "/fhir/Task"}
+	# Anything deeper than /fhir/<type>/<id> is neither.
+	not data.umzh.authz.read_action with input as {"method": "GET", "path": "/fhir/Task/t1/_history/1"}
+	not data.umzh.authz.read_action with input as {"method": "GET", "path": "/fhir/Task/"}
+}
+
+# GET /Task/t1 and GET /Task?_id=t1 have the same method and resource_id, but the
+# search needs s and the read r.
+test_same_id_read_needs_r_search_needs_s if {
+	data.umzh.authz.allow with input as req_in("GET", "Task", "t1", "system/Task.r", org_a, "")
+		with http.send as mock_task_a
+	not data.umzh.authz.allow with input as search_in("Task", "t1", "system/Task.r", "")
+		with http.send as mock_task_a
+	data.umzh.authz.allow with input as search_in("Task", "t1", "system/Task.s", "")
+		with http.send as mock_task_a
+}
+
+# ============================================================================
+# The request — type and id come from the path and the query, not the input
+# ============================================================================
+test_resource_from_path_and_id if {
+	data.umzh.authz.requested_ref == "Patient/p1" with input as {"method": "GET", "path": "/fhir/Patient/p1"}
+	data.umzh.authz.requested_ref == "Patient/p1" with input as {"method": "GET", "path": "/fhir/Patient", "query_params": [{"_id": "p1"}]}
+	data.umzh.authz.resource_id == "" with input as {"method": "GET", "path": "/fhir/Patient"}
+	# Two _id values name no single resource (and the search is denied).
+	data.umzh.authz.resource_id == "" with input as {"method": "GET", "path": "/fhir/Patient", "query_params": [{"_id": "p1"}, {"_id": "p2"}]}
+}
+
+# An id in the input is ignored: only the path and _id name the resource.
+test_input_resource_id_ignored if {
+	data.umzh.authz.requested_ref == "Task/t1" with input as {"method": "GET", "path": "/fhir/Task/t1", "resource_type": "Patient", "resource_id": "t2"}
+}
+
+# A path deeper than /fhir/<type>/<id> targets nothing OPA can name: denied, even
+# where the id and the caller would otherwise pass.
+test_deeper_path_denied if {
+	not data.umzh.authz.allow with input as object.union(req_in("GET", "Task", "t1", "system/Task.r", org_a, ""), {"path": "/fhir/Task/t1/_history/1"})
+		with http.send as mock_task_a
+	not data.umzh.authz.allow with input as object.union(create_in(new_task), {"path": "/fhir/Task/t1"})
+	not data.umzh.authz.allow with input as object.union(update_in(cancelled_task), {"path": "/fhir/Task/t1/_history/3"})
+		with http.send as mock_task_a
+}
+
+# Rule 5 is the CapabilityStatement read, not every method on its path.
+test_5_metadata_only_get if {
+	every method in ["POST", "PUT", "DELETE"] {
+		not data.umzh.authz.allow with input as {"method": method, "path": "/fhir/metadata", "query_params": [], "organization_reference": "", "scope": "", "context": ""}
+	}
+}
+
+# The 412 needs everything a decision needs: no FHIR server, no 412.
+test_version_mismatch_needs_admissible if {
+	not data.umzh.authz.task_version_mismatch with input as object.union(update_in(stored_task), {"header_if_match": `W/"2"`})
+		with http.send as mock_task_a
+		with opa.runtime as {"env": {}}
+		with data.config as {}
 }
