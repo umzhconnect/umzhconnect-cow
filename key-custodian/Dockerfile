@@ -33,6 +33,6 @@ COPY app.py /app/app.py
 
 EXPOSE 8000
 
-# Plain CPython server is fine for the sandbox — single worker, no concurrency
+# Plain CPython server is fine for the demo — single worker, no concurrency
 # pressure. Production would front this with gunicorn/uvicorn.
 CMD ["python", "/app/app.py"]

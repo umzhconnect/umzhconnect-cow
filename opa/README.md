@@ -10,11 +10,8 @@
 `policies/` holds only what the `umzh/authz/gateway` entrypoint needs:
 `gateway.rego` (the generic gateway/PEP request adapter — serves the APISIX
 gateway AND external consumers like MuleSoft) and `main.rego` (the consent /
-context rules it delegates to). These were forked from the two-party UMZH
-Connect sandbox (`services/opa/policies` there) and are now owned here —
-reconcile the two manually. The sandbox's `capabilities.rego` /
-`apisix_guarded.rego` (the OPA data-as-code param allowlist) are **not** copied,
-because the gateway enforces param/`_include` allowlists at the edge via
+context rules it delegates to). There is no OPA-side param allowlist: the
+gateway enforces param/`_include` allowlists at the edge via
 `umzh-capability-guard` instead.
 
 **Authorization is SMART-scope + context-centric.** Every rule in `main.rego`

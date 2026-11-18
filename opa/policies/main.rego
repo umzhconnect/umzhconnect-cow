@@ -52,7 +52,7 @@ import rego.v1
 #   ],
 #   "body": {},                                     # a write's parsed body
 #   "header_if_match": "",                          # the If-Match header, "" if none
-#   "organization_reference": "http://localhost:8084/fhir/Organization/HospitalF",
+#   "organization_reference": "https://registry.example.org/fhir/Organization/HospitalF",
 #   "scope": "system/Patient.rs system/ServiceRequest.rs ...",
 #   "context": "ServiceRequest/ReferralOrthopedicSurgery"   # the token's one context, "" if none
 # }

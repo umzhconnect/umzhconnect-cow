@@ -8,8 +8,7 @@ directly by callers, out-of-band.
 
 This is a **self-contained** single-party deployment: the external gateway
 (config + plugins), the OPA policies, and the key-custodian all live in this
-repo. It was forked from the two-party UMZH Connect sandbox; policy/gateway
-changes there are reconciled here manually. This node's env-specific data is
+repo. This node's env-specific data is
 rendered from `.env` at startup, and its L2 signing key is generated locally
 (`keys/gen-keys.sh`), never committed.
 
@@ -19,7 +18,7 @@ rendered from `.env` at startup, and its L2 signing key is generated locally
 |---|---|
 | `apisix-external` | External API gateway — JWT auth + OPA policy in front of `clinical-orders-fhir`. Runs the same standalone config as the k8s gateway (`clinical-orders/apisix/`); auth/OPA URLs from env. |
 | `opa` | Consent / context policy engine (party-local Rego in `opa/policies/`). |
-| `hapi-fhir` | The party's partitioned FHIR store (base), backed by a **managed (external) Postgres** — see below. Partition: `clinical-orders` (this party's data, acts as fulfiller). Internal only — reached via the proxy below. |
+| `hapi-fhir` | The party's partitioned FHIR store (base), backed by a **managed (external) Postgres** — see below. Partition: `clinical-orders` (this party's data). Internal only — reached via the proxy below. |
 | `clinical-orders-fhir` | Outward, **partition-less** FHIR proxy for this party's `clinical-orders` partition (mirrors the k8s proxy). Maps `/fhir/*` → base `/fhir/clinical-orders/*` and strips the partition out of self-links/`Location`. |
 | `key-custodian` | Holds the party's L2 private key; signs `private_key_jwt` assertions and serves the JWK Set. |
 | `clinical-orders-init` | One-shot (owned by `clinical-orders/`): create this party's empty `clinical-orders` partition on the base HAPI. |
@@ -57,7 +56,7 @@ The **partition layout** is created at seed time on the managed instance:
 
 | Partition | Contents |
 |---|---|
-| `clinical-orders` | This party's clinical data (acts as the fulfiller). Created empty; records arrive at runtime. |
+| `clinical-orders` | This party's clinical data, whether it acts as placer or fulfiller. Created empty; records arrive at runtime. |
 
 > The mCSD **registry** used to be a second partition here; it is now its own
 > self-contained deployment (see the `umzhconnect-registry` repo).
@@ -210,7 +209,7 @@ keys/gen-keys.sh l2                     # writes keys/l2.{key,jwks.json}, kid=l2
 
 # 2) configure
 cp .env.example .env
-# edit .env — at minimum PARTY, AUTH_SERVER_URL, and OWN_EXTERNAL_URL
+# edit .env — at minimum AUTH_SERVER_URL and OWN_EXTERNAL_URL
 # (must match the jwks.url registered above)
 
 # 3) run
@@ -244,16 +243,6 @@ auth server (assertion signed by `key-custodian`, context via RFC 9396
 `authorization_details`) → call the partner's external gateway directly. No
 internal proxy is involved.
 
-## Trying it against the sandbox
-
-The `.env.example` defaults point `AUTH_SERVER_URL` at the running root
-sandbox's Keycloak (`host.docker.internal:8180`) and deploy this node **as the
-fulfiller**, reusing the committed
-`fulfiller-client-l2` key. Because the JWK Set is the same committed key the
-sandbox already registered, the sandbox Keycloak can verify assertions this
-node's custodian signs. Set distinct host ports (defaults: 9080/9081/9090/…) so
-it can run alongside the sandbox.
-
 ## Notes / limitations
 
 - **The mCSD registry is external.** It is its own self-contained deployment
@@ -282,5 +271,4 @@ it can run alongside the sandbox.
   the **key-custodian** (`key-custodian/`) are all vendored here — nothing is
   referenced from outside the repo. The custodian's L2 signing key is generated
   locally by `keys/gen-keys.sh` and mounted from `./keys/l2.*`; the
-  private key is gitignored (see `keys/README.md`). This was forked from the
-  two-party sandbox — reconcile policy/gateway changes across the two manually.
+  private key is gitignored (see `keys/README.md`).
