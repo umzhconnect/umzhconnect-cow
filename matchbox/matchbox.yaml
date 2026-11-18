@@ -180,22 +180,23 @@ spec:
               port: 8080
             periodSeconds: 20
             failureThreshold: 3
+          # Measured with v4.1.21 (lazy terminology loading since 4.1.18) on the
+          # ch.fhir.ig.ch-etoc#3.0.1 closure (11 packages): a fresh install into
+          # an empty database + map load + $validate succeed in a 1.5Gi
+          # container; at 2Gi the heap peaks at ~1.4 GB (of 1.5 GB), and the live
+          # heap after GC is ~500 MB. 3Gi (→ ~2.25 GB heap at 75%) leaves room for
+          # concurrent/larger validations and the map-load engine reload. Raise
+          # it if you add IGs (e.g. ch-umzh-connect pulls ~23 packages) or see
+          # OOMKilled (exit 137) — the JVM also exits on OutOfMemoryError.
           resources:
             requests:
-              # Sized to fit the single USZ dev worker (~13.1Gi allocatable, ~4.7Gi
-              # unrequested). Matchbox can burst to the 8Gi limit above this, but
-              # under node memory pressure it is then an early OOM/eviction
-              # candidate. Raise toward 6Gi once the worker has the headroom.
+              # Request ≈ the working set, so the scheduler reserves what matchbox
+              # really uses; the limit gives it burst room above that.
               cpu: 500m
-              memory: 4Gi
+              memory: 2Gi
             limits:
-              # Matchbox is memory-heavy: the CH eToC IG + terminology closure is
-              # ~290 MB of package JSON, and onlyOneEngine's engine reload (after
-              # the map PUT) roughly doubles peak usage (the image even defaults
-              # to -Xmx12g). 8Gi (→ ~6Gi heap at 75%) is the floor for THIS
-              # closure — raise toward 12Gi if you see OOMKilled (exit 137).
               cpu: '2'
-              memory: 8Gi
+              memory: 3Gi
         # ── Map loader sidecar ────────────────────────────────────────────────
         # matchbox keeps runtime-loaded StructureMaps in memory only, so every
         # matchbox (re)start drops them. This sidecar runs load-maps.sh in watch

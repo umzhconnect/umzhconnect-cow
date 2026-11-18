@@ -48,8 +48,9 @@ image; there is no wrapper.
   packages, ~290 MB) so matchbox can `$validate` against `ch-etoc-document`. On
   first boot the closure is fetched from `packages.fhir.org` /
   `packages2.fhir.org` / `packages.simplifier.net` **through the corporate
-  proxy** (those hosts must be allowed) and persisted in Postgres. Needs the 8Gi
-  pod — a 3 GB container OOM-kills mid-install.
+  proxy** (those hosts must be allowed) and persisted in Postgres. With v4.1.21
+  the closure (11 packages) installs and validates in a 1.5 GiB container; the
+  pod requests 2Gi with a 3Gi limit. It takes ~110 MB in Postgres.
 - [`db-config.yaml`](db-config.yaml) + [`db-secret.yaml`](db-secret.yaml) —
   **k8s only**: the `DB_*` env for the Postgres datasource in `application.yaml`
   (`matchbox-db-config` ConfigMap; password in the plaintext
