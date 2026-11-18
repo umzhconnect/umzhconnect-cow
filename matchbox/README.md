@@ -31,7 +31,8 @@ run (the workflow's `ETOC_STRUCTUREMAP_URL`).
 > - **POST the source once:** `POST /matchboxv3/fhir/StructureMap` with
 >   `Content-Type: text/fhir-mapping` and the `.map`/`.fml` body — matchbox
 >   compiles it to a StructureMap and serves it under its declared canonical.
->   (With a persistent `/database`, it survives restarts — see below.)
+>   (It is held in the engine's memory only, so it is lost on restart and must
+>   be loaded again — see below.)
 > - **Ship it in an IG package** you also list in `application.yaml`
 >   (`hapi.fhir.implementationguides`), so it loads at boot.
 
@@ -47,19 +48,26 @@ image; there is no wrapper.
   packages, ~290 MB) so matchbox can `$validate` against `ch-etoc-document`. On
   first boot the closure is fetched from `packages.fhir.org` /
   `packages2.fhir.org` / `packages.simplifier.net` **through the corporate
-  proxy** (those hosts must be allowed) and persisted on the PVC. Needs the 8Gi
+  proxy** (those hosts must be allowed) and persisted in Postgres. Needs the 8Gi
   pod — a 3 GB container OOM-kills mid-install.
-- [`load-maps.yaml`](load-maps.yaml) + [`load-maps.sh`](load-maps.sh) — **k8s
-  Job** that `PUT`s every `maps/*.fml` to `StructureMap/<name>`
-  (`text/fhir-mapping`, idempotent). It waits until the IG install has finished
-  (`ch-etoc-document` searchable), since `/metadata` already answers while the
-  first-boot install is still running. Runs as an ArgoCD PostSync hook.
+- [`db-config.yaml`](db-config.yaml) + [`db-secret.yaml`](db-secret.yaml) —
+  **k8s only**: the `DB_*` env for the Postgres datasource in `application.yaml`
+  (`matchbox-db-config` ConfigMap; password in the plaintext
+  `matchbox-db-secret`). Compose passes the same variables from `.env`.
+- [`load-maps.sh`](load-maps.sh) — `PUT`s every `maps/*.fml` to
+  `StructureMap/<name>` (`text/fhir-mapping`, idempotent), once
+  `ch-etoc-document` is searchable (`/metadata` already answers while the
+  first-boot IG install is still running). On k8s it runs as the **`load-maps`
+  sidecar** of the matchbox pod in watch mode (`WATCH_INTERVAL=30`): it reloads
+  a map whenever matchbox has lost it (every restart, see below) or its `.fml`
+  changed in the `matchbox-maps` ConfigMap, and the sidecar is Ready only while
+  all maps are loaded — so the pod takes traffic only once `$transform` works.
 
 Matchbox is **not on Docker Hub** — the official image is on Google Artifact
-Registry (`europe-west6-docker.pkg.dev/ahdis-ch/ahdis/matchbox`, latest stable
-`v4.1.14`). Mirror it into your registry as you do other official images and set:
+Registry (`europe-west6-docker.pkg.dev/ahdis-ch/ahdis/matchbox`, pinned here to
+`v4.1.21`). Mirror it into your registry as you do other official images and set:
 
-- **k8s**: `matchbox.yaml` → `image: harbor-registry.io.usz.ch/prj-0011608-umzhc/matchbox:v4.1.14`;
+- **k8s**: `matchbox.yaml` → `image: harbor-registry.io.usz.ch/prj-0011608-umzhc/matchbox:v4.1.21`;
   the `JAVA_TOOL_OPTIONS` proxy env there routes the IG fetch via the proxy.
 - **compose**: `MATCHBOX_IMAGE` (default is the GAR ref). No proxy — needs
   direct internet access.
@@ -73,48 +81,68 @@ On k8s the proxy is passed as **JVM system properties** (the JVM ignores
 -Dhttp.nonProxyHosts=localhost|127.*|*.svc|*.cluster.local
 ```
 
-**Heap:** the official entrypoint hard-codes `-Xmx12g`, which OOMs a normal pod.
-Both the Deployment `command:` and the compose `entrypoint:` re-declare the
-upstream command with `-XX:MaxRAMPercentage=75.0` instead — a config override,
-no rebuild.
+**TLS inspection:** the USZ proxy re-signs HTTPS with *USZ Root CA 2*, which the
+JVM doesn't trust (symptom: `HAPI-1301: Unable to locate package`). A
+`truststore` initContainer (same image, its own `keytool`) copies the image's
+default `cacerts`, imports [`truststore/usz-root-ca.crt`](truststore/usz-root-ca.crt)
+(public cert, copied from `umzhconnect-auth`), and the JVM uses it via
+`-Djavax.net.ssl.trustStore` in `JAVA_TOOL_OPTIONS`.
+
+**Heap / JVM:** since 4.1.18 the image sizes the heap from the container limit
+via `JDK_JAVA_OPTIONS` (`-XX:MaxRAMPercentage=70 -XX:+ExitOnOutOfMemoryError
+-XX:+UseStringDeduplication`). Both the Deployment `command:` and the compose
+`entrypoint:` re-declare the upstream command only to also load
+`ig-validation.yaml` (compose also forces SSRF protection on); `java` still reads
+`JDK_JAVA_OPTIONS`. k8s raises the heap to `-XX:MaxRAMPercentage=75.0`, which
+wins because it comes later on the command line.
 
 **Terminology:** `txServer: n/a` (pinned in `application.yaml`) — matchbox makes
 **no `tx.fhir.org` call**. The only egress is the package fetch at boot.
 
-### Database (embedded H2) and persistence
+### Database and persistence
 
-Matchbox is a HAPI JPA server, so a datasource always exists — but it's the
-built-in **file-based H2** (`jdbc:h2:file:./database/h2` → `/database`); **no
-external DB is required**.
+Matchbox is a HAPI JPA server: installed IG packages live in its database, so a
+restart skips the IG download. StructureMaps loaded at runtime (`POST`/`PUT
+text/fhir-mapping`) do **not**: the engine keeps them in memory only, so they are
+lost on every restart. On k8s the `load-maps` sidecar puts them back
+automatically; with compose, re-run `matchbox/test-transform.sh`.
 
-- **Ephemeral** (no volume at `/database`): matchbox re-fetches the IGs (via the
-  proxy) on every restart, and a POSTed StructureMap is lost. Simplest.
-- **Persistent** (recommended): mount a volume at `/database` so installed
-  packages **and** your POSTed map survive restarts.
-  - **k8s**: the `matchbox-database` **PersistentVolumeClaim** (`ReadWriteOnce`, 10Gi)
-    is mounted at `/database`; `securityContext.fsGroup: 1000` makes it writable
-    by the image's `matchbox` user (uid 1000). Because file H2 is single-writer,
-    keep **`replicas: 1`** and `strategy: Recreate`. Delete the PVC + mount to go
-    ephemeral.
-  - **compose**: the named volume `matchbox-db` is mounted at `/database`
-    (`docker compose down -v` clears it).
+Both compose and k8s use the **managed PostgreSQL** — the same external server
+as HAPI and Kestra, with matchbox's **own database**. Create it (owned by
+`DB_USERNAME`) before matchbox first starts; matchbox creates its schema on
+first boot. The datasource in [`application.yaml`](application.yaml) replaces
+matchbox's built-in H2 and has **no fallback**: `DB_HOST`, `DB_PORT`, `DB_NAME`,
+`DB_USERNAME` and `DB_PASSWORD` must all be set, or matchbox fails to start.
+Driver and Hibernate dialect are fixed literals (`org.postgresql.Driver`,
+`HapiFhirPostgresDialect`, as in matchbox's `with-postgres` example) — keep the
+dialect a literal: matchbox reads `spring.jpa.properties.*` without resolving
+`${…}` placeholders.
 
-## Air-gapped alternative — Option B (baking / internal mirror)
+- **compose:** the matchbox service passes `DB_*` from `.env`, with
+  `DB_NAME` ← `MATCHBOX_DB_NAME` (default `matchbox`). For a Postgres on the
+  Docker host it maps `host.docker.internal` (`extra_hosts`), like HAPI and
+  Kestra.
+- **k8s:** the pod gets them via `envFrom`:
+  - [`db-config.yaml`](db-config.yaml) → `matchbox-db-config` ConfigMap:
+    `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USERNAME`;
+  - [`db-secret.yaml`](db-secret.yaml) → `matchbox-db-secret` Secret:
+    `DB_PASSWORD`, as **plaintext** `stringData` for the dev cluster. For a real
+    deployment deliver it as a SealedSecret or out of band instead of committing
+    it.
 
-If the proxy **cannot** reach `packages.fhir.org`, don't rely on the boot fetch.
-[`fetch-packages.sh`](fetch-packages.sh) resolves the full transitive package
-closure from one root (`ch.fhir.ig.ch-umzh-connect#1.0.0-ballot`) — it handles
-wildcard versions and skips the FHIR-core packages matchbox already provides —
-producing the exact set of `.tgz` files. Then either:
+  The pod is stateless (no PVC). Keep **`replicas: 1`** and `strategy:
+  Recreate`: two pods starting together would install the IG closure into the
+  same database at once.
 
-- publish those tarballs to an **internal mirror** and give each
-  `implementationguides` entry a `url:` (e.g. `url: https://mirror.internal/…tgz`
-  or `url: file:/packages/…tgz`), or
-- bake them into a wrapper image ([`Dockerfile`](Dockerfile) is a starting point;
-  note matchbox loads via `url:`, **not** the `~/.fhir/packages` filesystem
-  cache — a plain cache bake is ignored).
+## Without the proxy (not implemented)
 
-These artifacts are **not used by Option D** and are kept only for this path.
+If the proxy can't reach the package registry — or to turn SSRF protection back
+on (it must be off only because the proxy has a private IP) — matchbox would
+have to load the IG closure from an **internal mirror** instead: publish the
+`.tgz` files of all 11 packages there and point the `implementationguides`
+entries at them. Note matchbox installs packages into its database; it does
+**not** read the `~/.fhir/packages` filesystem cache, so copying packages into
+the image is not enough.
 
 ## Developing & testing the map
 
@@ -130,11 +158,12 @@ These artifacts are **not used by Option D** and are kept only for this path.
   matchbox/test-transform.sh          # compiles+loads the .fml, runs $transform, prints result
   # MATCHBOX_URL overrides the base (default http://localhost:9088/matchboxv3/fhir)
   ```
-  Needs `onlyOneEngine: true` (set) so the POSTed map is picked up at runtime; a
-  persistent `/database` keeps it loaded across restarts.
-- **Deployment loading:** on k8s the `matchbox-load-maps` Job loads the map (see
-  above); re-run it after changing the `.fml`
-  (`kubectl -n matchbox delete job matchbox-load-maps && kubectl apply -k matchbox/`).
+  Needs `onlyOneEngine: true` (set) so the POSTed map is picked up at runtime;
+  it is lost when matchbox restarts, so re-run the script then.
+- **Deployment loading:** on k8s the `load-maps` sidecar loads the map (see
+  above). After changing the `.fml`, apply/sync the kustomization: the sidecar
+  sees the updated ConfigMap within about a minute (kubelet sync) and reloads it.
+  Follow it with `kubectl -n matchbox logs deploy/matchbox -c load-maps -f`.
 
 ## Notes
 

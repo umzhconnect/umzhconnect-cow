@@ -584,7 +584,7 @@ docs {
   (the exact getServiceRequest response shape, incl. the requester's
   Practitioner via _include:iterate=PractitionerRole:practitioner) and returns a
   CH eToC document Bundle. The map must be loaded first: on k8s the
-  matchbox-load-maps Job does that after deploy; locally run
+  load-maps sidecar of the matchbox pod does that; locally run
   matchbox/test-transform.sh once. Otherwise you get 422 "Map not available".
   Canonical: http://umzhconnect.ch/fhir/StructureMap/ServiceRequestBundleToChEtoc
   The result is stored in the runtime var etocDocument, which

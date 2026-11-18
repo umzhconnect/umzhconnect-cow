@@ -16,9 +16,31 @@
 # ConfigMap by kustomize (see kustomization.yaml `matchbox-config`).
 #
 # The transform map is CUSTOM (CH eToC ships none): author it in FHIR Mapping
-# Language and POST it (text/fhir-mapping); with a persistent /database it
-# survives restarts.
+# Language and POST it (text/fhir-mapping). A map loaded at runtime is held in
+# the engine's memory only — reload it after every restart.
 # =============================================================================
+
+# ── Datasource: the managed (external) PostgreSQL — compose AND k8s ─────────
+# Replaces matchbox's built-in file H2. Same server as HAPI and Kestra, with
+# matchbox's OWN pre-created database (DB_NAME). NO host or credentials are baked
+# in and there is NO fallback: every ${DB_*} must be set, or matchbox fails to
+# start. compose passes them from .env (DB_NAME ← MATCHBOX_DB_NAME); k8s from the
+# matchbox-db-config ConfigMap + matchbox-db-secret Secret (DB_PASSWORD).
+#
+# Driver and dialect follow matchbox's own with-postgres example (the PostgreSQL
+# JDBC driver ships in the official image). Keep the dialect a literal: matchbox
+# collects spring.jpa.properties.* from the raw property sources WITHOUT
+# resolving ${…} (EnvironmentHelper.getHibernateProperties).
+spring:
+  datasource:
+    url: jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driverClassName: org.postgresql.Driver
+  jpa:
+    properties:
+      hibernate.dialect: ca.uhn.fhir.jpa.model.dialect.HapiFhirPostgresDialect
+
 server:
   servlet:
     # Matchbox serves FHIR under this context path; the workflow's transform URL
@@ -39,8 +61,6 @@ matchbox:
 
 hapi:
   fhir:
-    # Backed by matchbox's bundled embedded H2 (jdbc:h2:file:./database/h2 →
-    # /database). Mount a PVC/volume at /database to persist the POSTed map.
     fhir_version: R4
     # No implementationguides here — the CH eToC IG load for validation lives
     # in ig-validation.yaml (k8s only).

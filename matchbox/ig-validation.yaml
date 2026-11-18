@@ -13,8 +13,20 @@
 # for this check.
 #
 # Packages are fetched from packages.fhir.org / packages.simplifier.net through
-# the proxy at first boot and persisted in H2 on the /database PVC.
+# the proxy at first boot and persisted in matchbox's database (Postgres on k8s).
 # =============================================================================
+matchbox:
+  fhir:
+    context:
+      # SSRF protection rejects every connection to a non-public address — and
+      # it also applies to the PROXY: proxy.usz.ch resolves to 10.x, so with it
+      # on, every package fetch fails ("Refusing to fetch from non-public
+      # address … for host proxy.usz.ch" → HAPI-1301). matchbox's own default
+      # (true) overrides fhir-settings.json, so it must be switched off here.
+      # Consequence: content being validated can make matchbox fetch arbitrary
+      # URLs, including in-cluster ones — keep the ingress restricted to
+      # trusted callers.
+      ssrfProtectionEnabled: false
 hapi:
   fhir:
     implementationguides:

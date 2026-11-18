@@ -32,6 +32,24 @@
 //     ch-orf Questionnaire + QuestionnaireResponse stubs satisfy the document's
 //     ch-orf slices (these are conformance stubs, NOT real referral-form data —
 //     replace once the workflow supplies a real Questionnaire/QR).
+//   - ServiceRequest.meta is replaced by meta.profile = ch-etoc-servicerequest
+//     (the placer's ch-umzh-connect-servicerequest derives from it and is
+//     unknown to the target); all other ServiceRequest content is copied
+//     unchanged.
+// Source meta: the Kestra flow (stripMeta) removes every resource's meta BEFORE
+// the transform, so the copied resources carry none — the only meta in the
+// output is what this map declares (Bundle, Composition, ServiceRequest, ch-orf
+// stubs). Run on a raw sample (test-transform.sh), the copied resources keep
+// the placer's meta.
+//   - Optional sections are CONDITIONAL on the ServiceRequest's supporting
+//     content: a section (and each of its entries) is emitted only for resources
+//     the ServiceRequest references AND the bundle contains — Problems ←
+//     Condition (reasonReference | supportingInfo), Medications ←
+//     MedicationStatement, Allergies ← AllergyIntolerance, Attachments ←
+//     DocumentReference (supportingInfo). All are 0..1 in ch-etoc-composition, and
+//     an empty section would fail cmp-1, so a sparse referral gets only the
+//     mandatory orderReferral section. Referenced resources with no eToC section
+//     (e.g. ImagingStudy) stay in the bundle unfiled.
 // Source data (resources are copied wholesale, so conformance of the copied
 // resources is the PLACER's responsibility — fixed in the placer seed bundle):
 //   - Condition.category uses the ch-etoc codes (primary-/secondary-diagnosis).
@@ -42,16 +60,18 @@
 //     _include:iterate=PractitionerRole:practitioner (allowed at the placer
 //     gateway), so PractitionerRole.practitioner resolves in the document.
 // Verified: matchbox/sample/ServiceRequestPetraMeier.json transforms to a
-// document that validates against ch-etoc-document with 0 errors.
+// document that validates against ch-etoc-document with 0 errors;
+// servicerequest-ReferralTumorboard.json (Problems + Medications + Allergies; its
+// ImagingStudies stay unfiled) also validates with 0 errors, every section
+// matching its named ch-etoc-composition slice. (Its Patient's
+// AHV identifier must NOT carry type MR — that matches both the ch-core-patient
+// AHVN13 and LocalPid slices and cascades into the ServiceRequest/Composition.)
 // Remaining (out of this map's scope):
 //   - Coverage has no eToC section (kept in the bundle, referenced by
 //     ServiceRequest.insurance).
 //   - Organization references point at the registry (absolute URLs, not in the
 //     bundle) — reported by the validator as information only.
-//   - Consider re-profiling the ServiceRequest to ch-etoc-servicerequest if the
-//     target requires it (source is ch-umzh-connect-servicerequest, derived from
-//     it).
-// NOTE: $validate needs the IG loaded in matchbox (currently transform-only).
+// NOTE: $validate needs the CH eToC IG loaded in matchbox (ig-validation.yaml).
 // =============================================================================
 
 map "http://umzhconnect.ch/fhir/StructureMap/ServiceRequestBundleToChEtoc" = "ServiceRequestBundleToChEtoc"
@@ -75,7 +95,8 @@ group Referral(source src : BundleSrc, target bundle : BundleTgt) {
          append(base2, '/Composition/') as cpath,
          append(cpath, cid) as compUrl,
          bundle.entry as ce, ce.fullUrl = compUrl, ce.resource = create('Composition') as comp, comp.id = cid then BuildComposition(src, comp) "composition";
-  // Copy every source resource into the document, unchanged (lossless)
+  // Copy every source resource into the document, unchanged (lossless) — except
+  // the ServiceRequest's meta.profile (see CopyEntry)
   src.entry as se -> bundle.entry as te then CopyEntry(se, te) "copyEntries";
   // Hardcoded ch-orf stubs so the ch-etoc-document Questionnaire /
   // QuestionnaireResponse slices are satisfied (not present in the source).
@@ -85,7 +106,64 @@ group Referral(source src : BundleSrc, target bundle : BundleTgt) {
 
 group CopyEntry(source se, target te) {
   se.fullUrl as u -> te.fullUrl = u "fu";
-  se.resource as r -> te.resource = r "res";
+  se.resource as r where (($this is ServiceRequest).not()) -> te.resource = r "res";
+  // ServiceRequest is rebuilt (not copied as-is) only to re-declare its profile —
+  // see EtocServiceRequest.
+  se.resource : ServiceRequest as r -> te.resource = create('ServiceRequest') as t then EtocServiceRequest(r, t) "resSr";
+}
+
+// ── ServiceRequest → ch-etoc-servicerequest ──────────────────────────────────
+// The placer's ch-umzh-connect-servicerequest is derived from
+// ch-etoc-servicerequest, so the resource already conforms; only meta is
+// replaced by the eToC profile the target knows. FML cannot drop one element from
+// a wholesale copy, so EVERY R4 ServiceRequest element is copied explicitly
+// (keep this list complete — an element missing here is silently lost).
+group EtocServiceRequest(source s : ServiceRequest, target t : ServiceRequest) {
+  // Always declared (even when the source has no meta — the Kestra flow strips
+  // it): the specific ch-etoc-servicerequest diagnostics then name the cause
+  // instead of only the document's ServiceRequest slice failing. The source meta
+  // itself is NOT carried over.
+  s -> t.meta as tm, tm.profile = 'http://fhir.ch/ig/ch-etoc/StructureDefinition/ch-etoc-servicerequest' "meta";
+  s.id                 as v -> t.id                    = v "id";
+  s.implicitRules         as v -> t.implicitRules         = v "implicitRules";
+  s.language              as v -> t.language              = v "language";
+  s.text                  as v -> t.text                  = v "text";
+  s.contained             as v -> t.contained             = v "contained";
+  s.extension             as v -> t.extension             = v "extension";
+  s.modifierExtension     as v -> t.modifierExtension     = v "modifierExtension";
+  s.identifier            as v -> t.identifier            = v "identifier";
+  s.instantiatesCanonical as v -> t.instantiatesCanonical = v "instantiatesCanonical";
+  s.instantiatesUri       as v -> t.instantiatesUri       = v "instantiatesUri";
+  s.basedOn               as v -> t.basedOn               = v "basedOn";
+  s.replaces              as v -> t.replaces              = v "replaces";
+  s.requisition           as v -> t.requisition           = v "requisition";
+  s.status                as v -> t.status                = v "status";
+  s.intent                as v -> t.intent                = v "intent";
+  s.category              as v -> t.category              = v "category";
+  s.priority              as v -> t.priority              = v "priority";
+  s.doNotPerform          as v -> t.doNotPerform          = v "doNotPerform";
+  s.code                  as v -> t.code                  = v "code";
+  s.orderDetail           as v -> t.orderDetail           = v "orderDetail";
+  s.quantity              as v -> t.quantity              = v "quantity";
+  s.subject               as v -> t.subject               = v "subject";
+  s.encounter             as v -> t.encounter             = v "encounter";
+  s.occurrence            as v -> t.occurrence            = v "occurrence";
+  s.asNeeded              as v -> t.asNeeded              = v "asNeeded";
+  s.authoredOn            as v -> t.authoredOn            = v "authoredOn";
+  s.requester             as v -> t.requester             = v "requester";
+  s.performerType         as v -> t.performerType         = v "performerType";
+  s.performer             as v -> t.performer             = v "performer";
+  s.locationCode          as v -> t.locationCode          = v "locationCode";
+  s.locationReference     as v -> t.locationReference     = v "locationReference";
+  s.reasonCode            as v -> t.reasonCode            = v "reasonCode";
+  s.reasonReference       as v -> t.reasonReference       = v "reasonReference";
+  s.insurance             as v -> t.insurance             = v "insurance";
+  s.supportingInfo        as v -> t.supportingInfo        = v "supportingInfo";
+  s.specimen              as v -> t.specimen              = v "specimen";
+  s.bodySite              as v -> t.bodySite              = v "bodySite";
+  s.note                  as v -> t.note                  = v "note";
+  s.patientInstruction    as v -> t.patientInstruction    = v "patientInstruction";
+  s.relevantHistory       as v -> t.relevantHistory       = v "relevantHistory";
 }
 
 // ── Hardcoded ch-orf conformance stubs ───────────────────────────────────────
@@ -120,9 +198,21 @@ group BuildComposition(source src : BundleSrc, target comp) {
   src.entry as e -> comp then SetAuthor(e, comp) "author";
   // orderReferral section (LOINC 93037-0) — required slice, files the ServiceRequest
   src -> comp.section as sec then OrderReferralSection(src, sec) "secOrder";
-  src -> comp.section as sec then ProblemsSection(src, sec) "secProblems";
-  src -> comp.section as sec then MedsSection(src, sec) "secMeds";
-  src -> comp.section as sec then AttachSection(src, sec) "secAttach";
+  // Optional sections (all 0..1 in ch-etoc-composition) are emitted ONLY when the
+  // ServiceRequest references at least one resource of the section's type that is
+  // also present in the bundle — an empty section would fail cmp-1, and a
+  // referenced-but-absent resource would leave a dangling section entry.
+  // Section codes carry the LOINC display (built as an explicit Coding — matchbox's
+  // cc() drops a display argument): the ch-etoc-composition section slices
+  // discriminate on system + code + display, so without it a section matches no
+  // named slice and its entries escape the per-section profile checks.
+  // "Referenced" = the entry's fullUrl or relative Type/id appears in
+  // supportingInfo (Problems also accepts reasonReference: the profile puts the
+  // primary diagnosis there, secondary diagnoses in supportingInfo).
+  src where (entry.resource.ofType(ServiceRequest).select(reasonReference | supportingInfo).reference.intersect(entry.where(resource is Condition).select(fullUrl | ('Condition/' + resource.id))).exists()) -> comp.section as sec then ProblemsSection(src, sec) "secProblems";
+  src where (entry.resource.ofType(ServiceRequest).supportingInfo.reference.intersect(entry.where(resource is MedicationStatement).select(fullUrl | ('MedicationStatement/' + resource.id))).exists()) -> comp.section as sec then MedsSection(src, sec) "secMeds";
+  src where (entry.resource.ofType(ServiceRequest).supportingInfo.reference.intersect(entry.where(resource is AllergyIntolerance).select(fullUrl | ('AllergyIntolerance/' + resource.id))).exists()) -> comp.section as sec then AllergiesSection(src, sec) "secAllergies";
+  src where (entry.resource.ofType(ServiceRequest).supportingInfo.reference.intersect(entry.where(resource is DocumentReference).select(fullUrl | ('DocumentReference/' + resource.id))).exists()) -> comp.section as sec then AttachSection(src, sec) "secAttach";
 }
 
 // Reference copied resources RELATIVELY (Type/id), matching the source style; they
@@ -154,8 +244,8 @@ group SrRef(source s : ServiceRequest, target ref) { s.id as id -> ref.reference
 // ── Problems section (LOINC 57852-6) ← Condition (primary + secondary dx) ────
 group ProblemsSection(source src : BundleSrc, target sec) {
   src -> sec.title = 'Problems' "t";
-  src -> sec.code = cc('http://loinc.org', '57852-6') "c";
-  src.entry as e -> sec then AddCondition(e, sec) "e";
+  src -> sec.code as sc, sc.coding as cd, cd.system = 'http://loinc.org', cd.code = '57852-6', cd.display = 'Problem list Narrative - Reported' "c";
+  src.entry as e where ((fullUrl | ('Condition/' + resource.id)).intersect(%src.entry.resource.ofType(ServiceRequest).select(reasonReference | supportingInfo).reference).exists()) -> sec then AddCondition(e, sec) "e";
 }
 group AddCondition(source e, target sec) {
   e.resource : Condition as c -> sec.entry as ref then CondRef(c, ref) "ref";
@@ -165,19 +255,30 @@ group CondRef(source c : Condition, target ref) { c.id as id -> ref.reference = 
 // ── Medications section (LOINC 42346-7) ← MedicationStatement ────────────────
 group MedsSection(source src : BundleSrc, target sec) {
   src -> sec.title = 'Medications' "t";
-  src -> sec.code = cc('http://loinc.org', '42346-7') "c";
-  src.entry as e -> sec then AddMed(e, sec) "e";
+  src -> sec.code as sc, sc.coding as cd, cd.system = 'http://loinc.org', cd.code = '42346-7', cd.display = 'Medications on admission (narrative)' "c";
+  src.entry as e where ((fullUrl | ('MedicationStatement/' + resource.id)).intersect(%src.entry.resource.ofType(ServiceRequest).supportingInfo.reference).exists()) -> sec then AddMed(e, sec) "e";
 }
 group AddMed(source e, target sec) {
   e.resource : MedicationStatement as m -> sec.entry as ref then MedRef(m, ref) "ref";
 }
 group MedRef(source m : MedicationStatement, target ref) { m.id as id -> ref.reference = append('MedicationStatement/', id) "r"; }
 
+// ── Allergies section (LOINC 48765-2) ← AllergyIntolerance ───────────────────
+group AllergiesSection(source src : BundleSrc, target sec) {
+  src -> sec.title = 'Allergies and Intolerances' "t";
+  src -> sec.code as sc, sc.coding as cd, cd.system = 'http://loinc.org', cd.code = '48765-2', cd.display = 'Allergies and adverse reactions Document' "c";
+  src.entry as e where ((fullUrl | ('AllergyIntolerance/' + resource.id)).intersect(%src.entry.resource.ofType(ServiceRequest).supportingInfo.reference).exists()) -> sec then AddAllergy(e, sec) "e";
+}
+group AddAllergy(source e, target sec) {
+  e.resource : AllergyIntolerance as a -> sec.entry as ref then AllergyRef(a, ref) "ref";
+}
+group AllergyRef(source a : AllergyIntolerance, target ref) { a.id as id -> ref.reference = append('AllergyIntolerance/', id) "r"; }
+
 // ── Attachments section (LOINC 55107-7) ← DocumentReference ──────────────────
 group AttachSection(source src : BundleSrc, target sec) {
   src -> sec.title = 'Attachments' "t";
-  src -> sec.code = cc('http://loinc.org', '55107-7') "c";
-  src.entry as e -> sec then AddDoc(e, sec) "e";
+  src -> sec.code as sc, sc.coding as cd, cd.system = 'http://loinc.org', cd.code = '55107-7', cd.display = 'Addendum Document' "c";
+  src.entry as e where ((fullUrl | ('DocumentReference/' + resource.id)).intersect(%src.entry.resource.ofType(ServiceRequest).supportingInfo.reference).exists()) -> sec then AddDoc(e, sec) "e";
 }
 group AddDoc(source e, target sec) {
   e.resource : DocumentReference as d -> sec.entry as ref then DocRef(d, ref) "ref";

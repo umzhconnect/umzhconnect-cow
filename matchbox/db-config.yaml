@@ -1,0 +1,21 @@
+# =============================================================================
+# Matchbox database connection — managed (external) PostgreSQL, NOT deployed in
+# the cluster. Same server as HAPI (hapi-fhir/managed-db-config.yaml) and Kestra
+# (kestra/config.yaml), with matchbox's OWN database (DB_NAME). Create that
+# database (owned by DB_USERNAME) before the first deploy; matchbox creates its
+# HAPI JPA schema in it on first boot.
+#
+# Injected into the pod via `envFrom` (matchbox.yaml) and resolved by the
+# datasource in the shared application.yaml — required, there is no fallback.
+# The password is NOT here — it is in the matchbox-db-secret Secret
+# (db-secret.yaml).
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: matchbox-db-config
+data:
+  DB_HOST: managed-postgres
+  DB_PORT: '5432'
+  DB_NAME: matchbox
+  DB_USERNAME: umzhconnect
