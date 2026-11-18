@@ -4,18 +4,15 @@
 # APISIX at load time from the apisix-gateway-config env (AUTH_DISCOVERY_URL,
 # OPA_URL, JWKS_UPSTREAM).
 #
-# This mirrors the sandbox's public external gateway
-# (services/apisix/external/apisix.yaml): the SAME request filter injection
-# (umzh-task-requester-inject) and the SAME security layers (openid-connect JWT →
-# umzh-capability-guard → OPA umzh/authz/gateway). The routes follow the IG, not
-# the sandbox. Two other things differ, both structural to the party deployment:
+# The routes follow the IG. Security layers: openid-connect JWT →
+# umzh-capability-guard → OPA umzh/authz/gateway, plus request filter injection
+# (umzh-task-requester-inject) on the Task list route.
 #
-#   1. Upstream is the clinical-orders-fhir proxy, not the base HAPI. That proxy
-#      maps /fhir/… → /fhir/clinical-orders/… and strips the partition from
-#      response self-links. So — unlike the sandbox — these routes do NOT carry a
-#      partition-adding proxy-rewrite; the proxy owns partition mapping.
-#   2. The health path is /healthz (the Deployment readiness probe), where the
-#      sandbox uses /__health. Same purpose.
+#   * Upstream is the clinical-orders-fhir proxy, not the base HAPI. That proxy
+#     maps /fhir/… → /fhir/clinical-orders/… and strips the partition from
+#     response self-links, so these routes carry NO partition-adding
+#     proxy-rewrite; the proxy owns partition mapping.
+#   * The health path is /healthz (the Deployment readiness probe).
 routes:
   # ─── Health check — unauthenticated, for the readiness probe ─────────────
   - id: gw-health

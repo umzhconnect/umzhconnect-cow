@@ -93,7 +93,7 @@ organization, scope or context.
 
 Points at the default host ports (gateway `:9081`, custodian `:9087`, OPA `:9181`,
 auth server `:8180`), the `orgA` test org identity, and `orgRef` set to
-the sandbox fulfiller org. Adjust these to your ecosystem — `orgRef` must equal
+this party's test org (the test suite's `OUR_ORG`). Adjust these to your ecosystem — `orgRef` must equal
 the token's `organization_reference`. The client id is not set here: the
 custodian always uses its own `CLIENT_ID` (`L2_CLIENT_ID` in `.env`).
 
