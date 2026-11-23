@@ -19,14 +19,15 @@ FROM python:3.12-slim
 RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
 
 # BUILD_INSECURE=1 relaxes pip's TLS host checks for a proxy presenting an
-# untrusted cert (dev only). Pins chosen to clear Trivy's fixable Python HIGHs:
-#   pyjwt 2.13.0        — CVE-2026-48526 (auth bypass), CVE-2026-32597 (crit hdr)
-#   cryptography 50.0.0 — CVE-2026-26007, -69247, -69249, bundled-OpenSSL GHSA
-#   requests 2.34.2     — CVE-2024-47081 (.netrc credential leak, fixed in 2.32.4)
+# untrusted cert (dev only). Pins must stay at or above the versions that clear
+# Trivy's fixable Python HIGHs:
+#   pyjwt >= 2.13.0        — CVE-2026-48526 (auth bypass), CVE-2026-32597 (crit hdr)
+#   cryptography >= 50.0.0 — CVE-2026-26007, -69247, -69249, bundled-OpenSSL GHSA
+#   requests >= 2.32.4     — CVE-2024-47081 (.netrc credential leak)
 ARG BUILD_INSECURE=
 RUN pip install --no-cache-dir \
     ${BUILD_INSECURE:+--trusted-host pypi.org --trusted-host files.pythonhosted.org} \
-    flask==3.0.3 pyjwt==2.13.0 cryptography==50.0.0 requests==2.34.2
+    flask==3.1.3 pyjwt==2.15.1 cryptography==50.0.2 requests==2.34.2
 
 WORKDIR /app
 COPY app.py /app/app.py

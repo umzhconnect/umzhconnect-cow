@@ -26,7 +26,7 @@ jobs:
   opa-tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # opa-test.sh uses the opa binary if present, else the OPA docker image.
       # ubuntu-latest has Docker, so no install step is needed.
       - name: Run OPA unit tests
@@ -36,7 +36,7 @@ jobs:
   proxy-backend-auth-tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Asserts the clinical-orders proxy injects the configured Authorization
       # upstream when PROXY_BACKEND_AUTHORIZATION is set, and passes the caller's
       # header through when empty. Needs only Docker + curl (present on
@@ -70,7 +70,7 @@ jobs:
           --health-retries 10
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install hurl
         env:
@@ -112,7 +112,7 @@ jobs:
 
       - name: Upload JUnit reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: hurl-junit-reports
           path: tests/reports/*.xml

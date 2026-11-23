@@ -41,7 +41,7 @@ services:
   # nginx image renders /etc/nginx/templates/*.template at start via envsubst,
   # substituting only PROXY_* (so nginx's own $host/$1 survive).
   clinical-orders-fhir:
-    image: nginx:alpine
+    image: nginx:1.30.6-alpine
     container_name: party-clinical-orders-fhir
     environment:
       PROXY_UPSTREAM: ${HAPI_BASE_UPSTREAM}
@@ -65,7 +65,7 @@ services:
 
   # ── OPA — consent / context policy engine ───────────────────────────────────
   opa:
-    image: openpolicyagent/opa:1.19.0
+    image: openpolicyagent/opa:1.22.4
     platform: linux/amd64
     container_name: party-opa
     environment:
@@ -137,7 +137,7 @@ services:
   #   :EXTERNAL_GATEWAY_PORT → clinical-orders-fhir:8080 → hapi-fhir (clinical-orders)
   #   /jwks.json             → key-custodian:8000
   apisix-external:
-    image: apache/apisix:3.17.0-debian
+    image: apache/apisix:3.21.0-debian
     container_name: party-apisix-external
     environment:
       AUTH_DISCOVERY_URL: ${AUTH_SERVER_URL}/realms/${AUTH_SERVER_REALM}/.well-known/openid-configuration
@@ -163,7 +163,7 @@ services:
   # ── One-shot: create this party's clinical-orders partition (owned by that ──
   # service; left empty — records arrive at runtime through the proxy).
   clinical-orders-init:
-    image: curlimages/curl:8.21.0
+    image: curlimages/curl:8.23.0
     container_name: party-clinical-orders-init
     environment:
       FHIR_BASE: http://hapi-fhir:8080/fhir
