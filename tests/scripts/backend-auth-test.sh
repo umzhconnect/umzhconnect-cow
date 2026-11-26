@@ -15,11 +15,12 @@
 # Requires: docker, curl. Exits non-zero on the first failed assertion.
 #
 #   tests/scripts/backend-auth-test.sh
+#   BUILD_INSECURE=1 tests/scripts/backend-auth-test.sh   # behind a TLS-intercepting proxy
 # =============================================================================
 set -eu
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-NGINX_IMAGE="nginx:alpine"
+NGINX_IMAGE="nginx:1.30.6-alpine"
 ECHO_IMAGE="umzh-mock-auth-echo:test"
 TEMPLATE="${ROOT}/clinical-orders/clinical-orders-proxy.conf.template"
 NET="umzh-baauth-net-$$"
@@ -45,7 +46,8 @@ echo " clinical-orders proxy — backend-auth e2e test"
 echo "============================================="
 
 echo "--- building echo image (mock-auth) ---"
-docker build -q -t "$ECHO_IMAGE" "${ROOT}/tests/mock-auth" >/dev/null
+docker build -q ${BUILD_INSECURE:+--build-arg BUILD_INSECURE="$BUILD_INSECURE"} \
+    -t "$ECHO_IMAGE" "${ROOT}/tests/mock-auth" >/dev/null
 
 echo "--- creating network + echo upstream ---"
 docker network create "$NET" >/dev/null

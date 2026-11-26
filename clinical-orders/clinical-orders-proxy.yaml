@@ -35,7 +35,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: proxy
-          image: nginxinc/nginx-unprivileged:alpine
+          image: nginxinc/nginx-unprivileged:1.30.6-alpine
           env:
             # Backend transport (k8s equivalents of the compose .env entries).
             - name: PROXY_UPSTREAM
