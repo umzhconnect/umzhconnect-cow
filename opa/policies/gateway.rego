@@ -3,170 +3,88 @@ package umzh.authz.gateway
 import rego.v1
 
 # ---------------------------------------------------------------------------
-# Gateway / PEP request adapter. The SAME entrypoint serves every Policy
-# Enforcement Point that fronts this node — the APISIX external gateway AND
-# external integration platforms (e.g. MuleSoft) reaching OPA through its ingress.
-# All of them POST the request they are proxying as `input.request`:
+# Gateway / PEP request adapter. The SAME entrypoint serves every API gateway acting
+# as Policy Enforcement Point (PEP) in front of this node, whether it calls OPA
+# in-cluster or through its ingress. Each POSTs the request it is proxying as
+# `input.request`:
 # {
 #   "input": {
 #     "request": {
 #       "method":  "GET",
 #       "path":    "/fhir/ServiceRequest",     # no query string
-#       "query":   {"_id": "ReferralOrthopedicSurgery"},
+#       # The raw query string, undecoded, exactly as forwarded to the FHIR server;
+#       # "" if there is none.  OPA parses it itself.
+#       "query_string": "_id=ReferralOrthopedicSurgery&_include=ServiceRequest:subject&_include=ServiceRequest:requester&_include:iterate=PractitionerRole:practitioner&_include:iterate=DiagnosticReport:result",
 #       "headers": {"authorization": "Bearer ..."},  # header name case-insensitive
-#       "body":    "{\"resourceType\": \"Task\"}"     # POST/PUT: the raw body, a string
+#       "body":    "{\"resourceType\": \"Task\"}"     # POST/PUT: the raw body as a string,
+#                                                    # or the same JSON as an object
 #     }
 #   }
 # }
 #
-# Party-specific constant (fhir_base) comes from data.config, injected per OPA
-# instance via a mounted config JSON — never from the caller.
+# This package only maps the request into main.rego's input. What the request
+# targets, and the FHIR server OPA reads from, are main.rego's to work out.
 #
-# ── TRUST MODEL (see BACKLOG.md) ────────────────────────────────────────────
-# io.jwt.decode below does NOT verify the JWT signature; it only reads the
-# claims. Every consumer MUST authenticate the token BEFORE calling OPA: APISIX
-# does it with its openid-connect plugin (JWKS); MuleSoft validates the token in
-# its own flow before forwarding. So OPA does authZ on an already-authN'd token.
-# Adding OPA-side signature verification (io.jwt.decode_verify vs the auth-server
-# JWKS) is a tracked improvement — see BACKLOG.md.
-# ---------------------------------------------------------------------------
-
-# A header value, looked up CASE-INSENSITIVELY: APISIX lowercases header names, but
-# other consumers (MuleSoft) may send "Authorization".
-_header(name) := v if {
-	some k, v in input.request.headers
-	lower(k) == name
-}
-
-# Absent ⇒ jwt_payload stays unset ⇒ default-deny.
-_authorization := _header("authorization")
-
-# Decode (NOT verify — see the trust model above) the JWT from the bearer.
-jwt_payload := payload if {
-	startswith(_authorization, "Bearer ")
-	tok := substring(_authorization, 7, -1)
-	[_, payload, _] := io.jwt.decode(tok)
-}
-
-# Party config. fhir_base normally comes from the per-instance data document
-# (opa-config.json). It MAY be overridden by the OPA process ENVIRONMENT
-# (opa.runtime().env.FHIR_BASE) so a party can point THIS otherwise-identical
-# policy + config bundle at a DIFFERENT (e.g. cluster-external) FHIR backend
-# WITHOUT editing the committed opa-config.json. The env wins when set & non-empty;
-# otherwise the data document is used. Never sourced from the caller.
-fhir_base := base if {
-	base := object.get(opa.runtime().env, "FHIR_BASE", "")
-	base != ""
-} else := data.config.fhir_base
-
-# OPTIONAL Authorization header OPA attaches to its own FHIR fetches (the
-# http.send calls in main.rego for Consent/Task/ServiceRequest). Sourced from the
-# OPA process ENVIRONMENT (opa.runtime().env), NOT the committed opa-config.json,
-# because it is a secret. Empty ⇒ no header (unchanged behaviour). Set it to the
-# full header value, e.g. "Basic <base64(user:pass)>", when the FHIR server OPA
-# queries requires credentials.
-fhir_authorization := object.get(opa.runtime().env, "FHIR_BACKEND_AUTHORIZATION", "")
-
-# ---------------------------------------------------------------------------
-# Path parsing
-# ---------------------------------------------------------------------------
-
-# /fhir/<type>  or  /fhir/<type>/<id>  →  ["<type>"] or ["<type>", "<id>"]
-_path_parts := split(trim_prefix(input.request.path, "/fhir/"), "/")
-
-resource_type := _path_parts[0]
-
-resource_id := id if {
-	count(_path_parts) >= 2
-	id := _path_parts[1]
-	id != ""
-} else := id if {
-	id := input.request.query["_id"]
-	id != ""
-} else := ""
-
-# Every _include value, whatever the modifier. APISIX sends a lone value as a
-# string and repeated ones as an array.
-_as_array(v) := v if is_array(v)
-
-_as_array(v) := [v] if not is_array(v)
-
-includes := [value |
-	some key, raw in input.request.query
-	startswith(key, "_include")
-	some value in _as_array(raw)
-]
-
-# FHIR id syntax. Anything else can mean one resource to OPA's fetch and another
-# to HAPI's search.
-_valid_id if resource_id == ""
-
-_valid_id if regex.match(`^[A-Za-z0-9.-]{1,64}$`, resource_id)
-
-# The Task _include gate can't see what a PEP doesn't forward. Only a search can
-# include anything: HAPI refuses _include on a read.
-_query_forwarded if input.request.method != "GET"
-
-_query_forwarded if resource_type != "Task"
-
-_query_forwarded if resource_id != ""
-
-_query_forwarded if is_object(input.request.query)
-
-# POST names the type and PUT one resource, in the path: HAPI ignores If-Match on a
-# conditional PUT /Task?_id=<id>, and nothing below a resource is a write target.
-_valid_path if input.request.method == "GET"
-
-_valid_path if count(_path_parts) == {"POST": 1, "PUT": 2}[input.request.method]
-
-# The raw body of a write: a string, so nothing reformats it before main.rego compares
-# it. Absent or not JSON ⇒ {} ⇒ the write rules deny.
-default _body := {}
-
-_body := json.unmarshal(input.request.body)
-
-default _if_match := ""
-
-_if_match := _header("if-match")
-
-# A search needs the s scope, a read the r scope.
-default _read_action := "r"
-
-_read_action := "s" if count(_path_parts) == 1
-
-# The token's contexts. Entries of other types are ignored.
-_contexts := [entry.identifier |
-	some entry in object.get(jwt_payload, "authorization_details", [])
-	entry.type == "http://fhir.ch/ig/ch-umzh-connect/context"
-]
-
-# Refused here, whatever main.rego decides.
-_well_formed if {
-	_valid_id
-	_valid_path
-	_query_forwarded
-
-	# conditionalCreate is false: HAPI would answer with the match, whoever owns it.
-	not _header("if-none-exist")
-}
-
-# ---------------------------------------------------------------------------
-# Delegate to main.rego with the mapped input shape
-# ---------------------------------------------------------------------------
-# Authorization is SMART-scope + context (organization_reference / consent /
-# context graph) centric — every rule in main.rego carries its own scope and
-# identity conditions, so there is no coarse realm-role gate here.
+# Naming: the ingress publishes this package, so only its entrypoints — `decision`,
+# `allow` and `status_code` — are public.  Everything else is `_`-prefixed.
 #
+# ── RESPONSIBILITIES (see BACKLOG.md) ───────────────────────────────────────
+# The API gateway in front of OPA (such as APISIX, MuleSoft or Kong) and OPA split
+# the work. OPA authorizes; it relies on the gateway for everything below and does
+# not check it again.
+#
+# The API gateway is responsible for:
+#   - Authentication. It validates the bearer token (signature, issuer, expiry)
+#     BEFORE calling OPA. _claims below does NOT verify the signature; it only
+#     reads the claims, so OPA decides on an already-authenticated token.
+#     OPA-side signature verification is a tracked improvement — see BACKLOG.md.
+#   - Allowlists. Only the operations, header parameters and query parameters the
+#     IG offers pass, everything else is refused: per route, the permitted methods
+#     and paths, query parameter names, _include and _include:iterate values, and
+#     headers. For example, an If-None-Exist header is refused (conditionalCreate
+#     is false), and so is any write but POST /fhir/Task or PUT /fhir/Task/<id>.
+#   - Sanity checks on header and query parameter values and on the body. For
+#     example, a resource id, in the path or in _id, matches FHIR id syntax
+#     ^[A-Za-z0-9.-]{1,64}$ (OPA builds its fetch URL from it), _id is
+#     single-valued, each header name appears once, and a write's body is valid
+#     application/fhir+json with no duplicate keys (OPA and the FHIR server could
+#     each keep a different one of the values).
+#   - Scoping a Task search to the caller. On GET /fhir/Task it sets
+#     requester=<the token's organization_reference> on the query it forwards to
+#     the FHIR server, replacing any requester the client sent. OPA only decides
+#     whether the search may run; without this, it returns every Task.
+#   - Forwarding to OPA exactly what it forwards to the FHIR server: the raw query
+#     string ("" if none) byte for byte, the If-Match header and the body (as the
+#     raw string or as the same JSON object). OPA
+#     reads _id and the _include values from that query string, and its decision
+#     only holds for what it was sent. (The requester filter above is the one
+#     addition, made after OPA's decision.)
+#
+# OPA is responsible for:
+#   - The authorization decision: SMART scopes, the caller's organization, the
+#     token's context and the Consent / context graph (main.rego).
+#   - Interpreting the request it is sent, and denying what it can't interpret: a
+#     request without a bearer token, a path deeper than /fhir/<type>/<id>, and a
+#     GET search whose query string is missing or malformed, or names _id more
+#     than once.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Entrypoints
+# ---------------------------------------------------------------------------
+
+# What every API gateway queries: {"allow": true}, or {"allow": false,
+# "status_code": 403 | 412}.
+decision := {"allow": true} if allow
+
+decision := {"allow": false, "status_code": status_code} if not allow
+
 # `default allow := false` makes `allow` an EXPLICIT boolean: a denied query returns
-# {"result": false} rather than an undefined {} (which happens when the rule body
-# isn't satisfied — e.g. no bearer, or main.rego denied). Callers should query
-# `decision` below, which carries it as its `allow` field.
+# {"result": false} rather than an undefined {}.
 default allow := false
 
 allow if {
-	_well_formed
-
-	# Evaluate existing policy with the input shape it expects.
+	_token_present
 	data.umzh.authz.allow with input as _policy_input
 }
 
@@ -174,30 +92,95 @@ allow if {
 default status_code := 403
 
 status_code := 412 if {
-	_well_formed
+	_token_present
 	data.umzh.authz.task_version_mismatch with input as _policy_input
 }
 
-# What APISIX and external callers (MuleSoft) query: the whole package also holds
-# the bearer and the request body.
-decision := {"allow": true} if allow
+# ---------------------------------------------------------------------------
+# The token
+# ---------------------------------------------------------------------------
 
-decision := {"allow": false, "status_code": status_code} if not allow
+# A header value, looked up CASE-INSENSITIVELY: gateways differ in how they case
+# header names ("authorization" or "Authorization").
+_header(name) := v if {
+	some k, v in input.request.headers
+	lower(k) == name
+}
 
+# Decode (NOT verify — see the responsibilities above) the JWT from the bearer.
+_decoded := payload if {
+	startswith(_header("authorization"), "Bearer ")
+	[_, payload, _] := io.jwt.decode(substring(_header("authorization"), 7, -1))
+}
+
+# No bearer token, or one that doesn't decode, is denied: every request needs one,
+# /fhir/metadata included.
+_token_present if is_object(_decoded)
+
+default _claims := {}
+
+_claims := _decoded
+
+# The token's contexts. Entries of other types are ignored.
+_contexts := [entry.identifier |
+	some entry in object.get(_claims, "authorization_details", [])
+	entry.type == "http://fhir.ch/ig/ch-umzh-connect/context"
+]
+
+# A token names exactly one context.  None or several ⇒ "", which main.rego denies
+# for every context-gated request.
+default _context := ""
+
+_context := _contexts[0] if count(_contexts) == 1
+
+# ---------------------------------------------------------------------------
+# The request
+# ---------------------------------------------------------------------------
+
+# The query, parsed here from the raw string: every value is an array, and a
+# repeated parameter keeps all its values.  Missing, not a string, or malformed
+# (bad percent-encoding, `;` as a separator) ⇒ undefined.
+_query := urlquery.decode_object(input.request.query_string) if is_string(input.request.query_string)
+
+# Every query parameter as its own {name: value} entry: a repeated one is several
+# entries.  null when the query didn't parse: main.rego then denies a GET search,
+# which depends on them, rather than read it as "no parameters".
+default _query_params := null
+
+_query_params := [{key: value} |
+	some key, values in _query
+	some value in values
+] if is_object(_query)
+
+# The body of a write, in either form: the raw string the gateway forwards to the
+# FHIR server, or that same JSON as an object.  The gateway has already refused
+# anything but valid application/fhir+json.  Absent, or a string that isn't JSON
+# ⇒ {} ⇒ the write rules deny.
+default _body := {}
+
+_body := input.request.body if is_object(input.request.body)
+
+_body := json.unmarshal(input.request.body) if is_string(input.request.body)
+
+default _if_match := ""
+
+_if_match := _header("if-match")
+
+# ---------------------------------------------------------------------------
+# main.rego's input
+# ---------------------------------------------------------------------------
+# Always built, whatever is missing: a missing method or path becomes "", which no
+# rule in main.rego permits.  Denials are main.rego's explicit decisions, never an
+# input that came out undefined.
 _policy_input := {
-	"method":        input.request.method,
-	"path":          input.request.path,
-	"resource_type": resource_type,
-	"resource_id":   resource_id,
-	"includes":      includes,
-	"body":          _body,
-	"if_match":      _if_match,
-	"read_action":   _read_action,
-	"token": {
-		"organization_reference": object.get(object.get(object.get(jwt_payload, "extensions", {}), "umzhconnect", {}), "organization_reference", ""),
-		"scope":                  object.get(jwt_payload, "scope", ""),
-		"contexts":               _contexts,
-	},
-	"fhir_base":          fhir_base,
-	"fhir_authorization": fhir_authorization,
+	"method":          object.get(input.request, "method", ""),
+	"path":            object.get(input.request, "path", ""),
+	"query_params":    _query_params,
+	"body":            _body,
+	"header_if_match": _if_match,
+
+	# From the token.
+	"organization_reference": object.get(object.get(object.get(_claims, "extensions", {}), "umzhconnect", {}), "organization_reference", ""),
+	"scope":                  object.get(_claims, "scope", ""),
+	"context":                _context,
 }

@@ -15,7 +15,13 @@ headers {
 
 body:json {
   {
-    "scope": "{{scope}}"
+    "scope": "{{scope}}",
+    "authorization_details": [
+      {
+        "type": "http://fhir.ch/ig/ch-umzh-connect/context",
+        "identifier": "{{serviceRequestRef}}"
+      }
+    ]
   }
 }
 
@@ -29,12 +35,16 @@ docs {
   The full L2 flow in one call: the key custodian signs the private_key_jwt
   assertion AND runs the client_credentials exchange at the auth server, then
   returns the token response. The access token is saved to `accessToken` and
-  carries this party's SMART scopes and organization_reference claim.
+  carries this party's SMART scopes, organization_reference claim and the
+  service request context as `fhirContext`.
 
   Body fields are optional: `scope` ({{scope}}) requests specific SMART scopes —
-  omit it to fall back to the custodian's DEFAULT_SCOPE. You can also pass RFC
-  9396 `authorization_details`, e.g.
-  [{"type": "http://fhir.ch/ig/ch-umzh-connect/context", "identifier": "ServiceRequest/<id>"}].
-  The client is always the custodian's CLIENT_ID; any other field is a 400.
-  The AS still decides what it grants.
+  omit it to fall back to the custodian's DEFAULT_SCOPE. The client is always
+  the custodian's CLIENT_ID; any other field (`client_id` included) is a 400.
+  `authorization_details` (RFC 9396, type
+  `http://fhir.ch/ig/ch-umzh-connect/context`) binds the token to one
+  ServiceRequest ({{serviceRequestRef}}); the custodian forwards it to the AS
+  as-is, and the gateway checks the resulting `fhirContext`. Send a single
+  context entry — OPA rejects tokens bound to more than one. The AS still
+  decides what it grants: decode the token to confirm `fhirContext` is present.
 }

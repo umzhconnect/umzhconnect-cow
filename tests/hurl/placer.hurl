@@ -128,6 +128,19 @@ HTTP 400
 [Asserts]
 jsonpath "$.issue[0].diagnostics" contains "unsupported _include value: Patient:general-practitioner"
 
+# An _id outside FHIR id syntax → capability-guard 400. OPA's fetch would stop at
+# the #, while HAPI searches for the whole value.
+GET {{gateway_url}}/fhir/Patient?_id=good%23x
+Authorization: Bearer {{token}}
+HTTP 400
+[Asserts]
+jsonpath "$.issue[0].diagnostics" contains "_id is not a valid FHIR id"
+
+# The same id in the path: no route.
+GET {{gateway_url}}/fhir/Patient/good%23x
+Authorization: Bearer {{token}}
+HTTP 404
+
 # A resource that is NOT in the SR graph → OPA denies (403), end to end.
 GET {{gateway_url}}/fhir/Patient/not-in-graph
 Authorization: Bearer {{token}}

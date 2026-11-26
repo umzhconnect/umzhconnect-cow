@@ -12,15 +12,12 @@
 --   * scope-gated:   caller must hold .s permission
 --   * server-side filtered: caller cannot see Tasks belonging to other requesters
 --
--- umzhconnect-cow variant (diverges from the sandbox original): this route
--- carries NO proxy-rewrite — partition mapping (/fhir/… → /fhir/clinical-orders/…)
+-- This route carries NO proxy-rewrite — partition mapping (/fhir/… → /fhir/clinical-orders/…)
 -- is done downstream by the clinical-orders-fhir proxy. Because the requester is
 -- a query parameter (not a path segment), we set it via ngx.req.set_uri_args,
 -- which APISIX forwards upstream when no proxy-rewrite has rebuilt the upstream
 -- URI. Assigning the `requester` key OVERWRITES any caller-supplied value, so the
--- filter cannot be widened. (The sandbox appended to ctx.var.upstream_uri because
--- a proxy-rewrite there had already rebuilt the upstream URI, discarding inbound
--- arg mutations; there is no such rewrite here.)
+-- filter cannot be widened.
 --
 -- The JWT signature is verified by the `openid-connect` plugin on the same route
 -- (access phase, priority 2599). This plugin runs later in the access phase

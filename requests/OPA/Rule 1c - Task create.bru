@@ -17,19 +17,14 @@ body:json {
   {
     "input": {
       "method": "POST",
-      "resource_type": "Task",
-      "resource_id": "",
       "path": "/fhir/Task",
       "body": {
         "resourceType": "Task",
         "requester": { "reference": "{{orgA}}" }
       },
-      "token": {
-        "organization_reference": "{{orgA}}",
-        "scope": "system/Task.c",
-        "contexts": []
-      },
-      "fhir_base": "{{opaFhirBase}}"
+      "organization_reference": "{{orgA}}",
+      "scope": "system/Task.c",
+      "context": ""
     }
   }
 }

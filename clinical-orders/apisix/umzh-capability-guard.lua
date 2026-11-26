@@ -11,7 +11,8 @@
 -- A request passes only if EVERY query key is explicitly permitted, after
 -- normalizing for FHIR parameter syntax:
 --   * every name in `require` is present
---   * `_id` (when allowed) is single-valued (no comma-OR, no repeats)
+--   * `_id` (when allowed) is single-valued (no comma-OR, no repeats) and FHIR id
+--     syntax; the routes check an id in the path the same way
 --   * `_include` values ∈ allow_includes  (rejects `*`, unknowns)
 --   * `_include:iterate` values ∈ allow_include_iterates (rejects `*`, unknowns;
 --     the only `:modifier` accepted on any key)
@@ -23,14 +24,26 @@
 -- modifiers, chained params, and generic control params (`_format`, `_count`,
 -- ...) are all rejected simply by not appearing in `allow_params`/`allow_includes`.
 --
+-- It also rejects an If-None-Exist header on every route: the IG's
+-- conditionalCreate is false, and HAPI would answer with the match, whoever owns
+-- it. OPA doesn't check this header, so this is the APISIX path's only guard.
+--
+-- On a write route (`forward_body`) it checks the body before OPA and HAPI see it:
+--   * Content-Type is application/fhir+json (parameters such as charset allowed)
+--   * the body is one JSON object, at most MAX_BODY_BYTES
+--   * no object in it, at any depth, has the same key twice. OPA and HAPI parse
+--     the body separately, and each could keep a different value: a different
+--     `requester` would let OPA approve a Task HAPI stores under another name.
+--     Keys are compared decoded, so "requester" is "requester".
+--
 -- Violations return 400 + an OperationOutcome (FHIR's `handling=strict`
--- behaviour for unsupported parameters; matches what HAPI itself returns). The
--- exact status code is intentionally simple here and may be revisited.
+-- behaviour for unsupported parameters; matches what HAPI itself returns), or 415
+-- for a wrong Content-Type.
 
 local core = require("apisix.core")
 local opa_helper = require("apisix.plugins.opa.helper")
 
--- A FHIR Task is far smaller; a larger body stays unread and OPA denies the write.
+-- A FHIR Task is far smaller; a larger body is refused.
 local MAX_BODY_BYTES = 1048576
 
 local schema = {
@@ -70,13 +83,18 @@ function _M.check_schema(conf)
   return core.schema.check(schema, conf)
 end
 
--- The stock opa plugin builds its input here and has no option for the body. If an
--- upgrade stops calling this, OPA gets no body and denies every write.
+-- The stock opa plugin builds its input here and has no option for the body or the
+-- raw query string. If an upgrade stops calling this, OPA gets neither and denies
+-- every request.
 local build_opa_input = opa_helper.build_opa_input
 
 function opa_helper.build_opa_input(conf, ctx, subsystem)
   local data = build_opa_input(conf, ctx, subsystem)
   data.input.request.body = ctx.umzh_request_body
+  -- The query exactly as the client sent it, undecoded, "" if none. OPA parses it
+  -- itself. umzh-task-requester-inject (priority 999) only rewrites the args after
+  -- OPA (2001) has decided.
+  data.input.request.query_string = ngx.var.args or ""
   return data
 end
 
@@ -86,10 +104,10 @@ local function to_set(arr)
   return s
 end
 
--- 400 + FHIR OperationOutcome. issue_code is a FHIR issue-type code
+-- 400 (or `status`) + FHIR OperationOutcome. issue_code is a FHIR issue-type code
 -- ("not-supported", "required", "invalid").
-local function reject(issue_code, msg)
-  return 400, {
+local function reject(issue_code, msg, status)
+  return status or 400, {
     resourceType = "OperationOutcome",
     issue = { {
       severity    = "error",
@@ -99,7 +117,95 @@ local function reject(issue_code, msg)
   }
 end
 
+local byte, sub = string.byte, string.sub
+local B_QUOTE, B_BACKSLASH, B_COMMA = 34, 92, 44
+local B_LBRACE, B_RBRACE, B_LBRACKET, B_RBRACKET = 123, 125, 91, 93
+
+-- The first key that appears twice in one JSON object, at any depth, or nil.
+-- Keys are compared decoded, so "requester" is "requester". Expects valid
+-- JSON: decode it first. cjson keeps one of the values silently, so it can't tell.
+local function duplicate_key(s)
+  local stack, top = {}, nil
+  local i, n = 1, #s
+  while i <= n do
+    local b = byte(s, i)
+    if b == B_QUOTE then
+      -- A string: find its closing quote, skipping escaped characters.
+      local j = i + 1
+      while true do
+        local c = byte(s, j)
+        if c == nil then return nil end
+        if c == B_BACKSLASH then
+          j = j + 2
+        elseif c == B_QUOTE then
+          break
+        else
+          j = j + 1
+        end
+      end
+      -- A string where an object expects a key is the key.
+      if top and top.expect_key then
+        local key
+        if sub(s, i, j):find("\\", 1, true) then
+          local decoded = core.json.decode("[" .. sub(s, i, j) .. "]")
+          key = decoded and decoded[1] or sub(s, i, j)
+        else
+          key = sub(s, i + 1, j - 1)
+        end
+        if top.keys[key] then
+          return key
+        end
+        top.keys[key] = true
+        top.expect_key = false
+      end
+      i = j + 1
+    else
+      if b == B_LBRACE then
+        top = { keys = {}, expect_key = true }
+        stack[#stack + 1] = top
+      elseif b == B_LBRACKET then
+        top = {}
+        stack[#stack + 1] = top
+      elseif b == B_RBRACE or b == B_RBRACKET then
+        stack[#stack] = nil
+        top = stack[#stack]
+      elseif b == B_COMMA and top and top.keys then
+        top.expect_key = true
+      end
+      i = i + 1
+    end
+  end
+  return nil
+end
+
+-- The write's body, or a rejection.
+local function checked_body(ctx)
+  local media_type = (ngx.var.content_type or ""):lower():match("^%s*([^;%s]+)")
+  if media_type ~= "application/fhir+json" then
+    return nil, 415, "Content-Type must be application/fhir+json"
+  end
+  local body = core.request.get_body(MAX_BODY_BYTES, ctx)
+  if not body then
+    return nil, 400, "request body missing or larger than " .. MAX_BODY_BYTES .. " bytes"
+  end
+  local doc = core.json.decode(body)
+  if type(doc) ~= "table" or getmetatable(doc) == core.json.array_mt then
+    return nil, 400, "request body is not a JSON object"
+  end
+  local dup = duplicate_key(body)
+  if dup then
+    return nil, 400, "duplicate key in request body: " .. dup
+  end
+  return body
+end
+
 function _M.access(conf, ctx)
+  -- ngx.var sees every request header, however many there are; ngx.req.get_headers
+  -- stops at a limit. An empty value is still the header, so test for nil.
+  if ngx.var.http_if_none_exist ~= nil then
+    return reject("not-supported", "conditional create not supported: If-None-Exist")
+  end
+
   -- Use ngx.req directly (not core.request wrapper) so the "truncated" signal
   -- is visible. 20 covers the widest legitimate route (7 params max) with room
   -- to spare; anything beyond that fails closed rather than being silently
@@ -151,6 +257,12 @@ function _M.access(conf, ctx)
         if type(val) == "string" and val:find(",", 1, true) then
           return reject("invalid", "_id must be single-valued")
         end
+        -- FHIR id syntax. OPA builds its fetch URL from this id and doesn't check
+        -- it: `good#/QuestionnaireResponse/victim` would be `good` to OPA's fetch.
+        -- A bare `_id` (no `=`) arrives as a boolean.
+        if type(val) ~= "string" or not ngx.re.find(val, [[^[A-Za-z0-9.-]{1,64}$]], "jo") then
+          return reject("invalid", "_id is not a valid FHIR id")
+        end
       end
     end
   end
@@ -168,7 +280,11 @@ function _M.access(conf, ctx)
     if headers_err == "truncated" then
       return reject("invalid", "too many request headers")
     end
-    ctx.umzh_request_body = core.request.get_body(MAX_BODY_BYTES, ctx)
+    local body, status, msg = checked_body(ctx)
+    if not body then
+      return reject(status == 415 and "not-supported" or "invalid", msg, status)
+    end
+    ctx.umzh_request_body = body
   end
 end
 

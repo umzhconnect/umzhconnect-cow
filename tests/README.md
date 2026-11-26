@@ -70,8 +70,8 @@ skips the role scenarios.
 |------|------|--------|
 | `01-health.hurl` | none | gateway `/healthz` + `/jwks.json`, custodian, OPA |
 | `02-auth-negative.hurl` | none | gateway rejects missing / malformed / tampered bearer → `401` |
-| `placer.hurl` | token | **this node as placer** — no-bearer `401`; authorized `ServiceRequest` search + `_include` / allowlisted `_include:iterate` (requester `PractitionerRole` → `Practitioner`), read-by-id of the SR and a referenced `Patient` (OPA Rule 4); negatives: no `_id` → 400, non-allowlisted `_include:iterate` (incl. a value allowlisted only for plain `_include`) → 400, `_include:recurse` → 400, not-in-graph → 403 |
-| `fulfiller.hurl` | token | **this node as fulfiller** — no-bearer `401`; Task create (1c), list/read (1a/1b), cancel and answer by PUT (1d), Questionnaire search (3); negatives: stale `If-Match` → 412, `If-None-Exist`, unknown id → 403, PATCH → 404 |
+| `placer.hurl` | token | **this node as placer** — no-bearer `401`; authorized `ServiceRequest` search + `_include` / allowlisted `_include:iterate` (requester `PractitionerRole` → `Practitioner`), read-by-id of the SR and a referenced `Patient` (OPA Rule 4); negatives: no `_id` → 400, non-allowlisted `_include:iterate` (incl. a value allowlisted only for plain `_include`) → 400, `_include:recurse` → 400, `_id` outside FHIR id syntax → 400 (404 in the path), not-in-graph → 403 |
+| `fulfiller.hurl` | token | **this node as fulfiller** — no-bearer `401`; Task create (1c), list/read (1a/1b), cancel and answer by PUT (1d), Questionnaire search (3); negatives: stale `If-Match` → 412, `If-None-Exist` → 400, a write body that isn't `application/fhir+json` → 415 or isn't one JSON object or repeats a key (plain, escaped or nested) → 400, Task search `_include` without `_id` → 403, unknown id → 403, PATCH or a write on another path → 404 |
 
 ### Auth source — mock or real
 

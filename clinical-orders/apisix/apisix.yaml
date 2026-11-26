@@ -4,18 +4,15 @@
 # APISIX at load time from the apisix-gateway-config env (AUTH_DISCOVERY_URL,
 # OPA_URL, JWKS_UPSTREAM).
 #
-# This mirrors the sandbox's public external gateway
-# (services/apisix/external/apisix.yaml): the SAME request filter injection
-# (umzh-task-requester-inject) and the SAME security layers (openid-connect JWT →
-# umzh-capability-guard → OPA umzh/authz/gateway). The routes follow the IG, not
-# the sandbox. Two other things differ, both structural to the party deployment:
+# The routes follow the IG. Security layers: openid-connect JWT →
+# umzh-capability-guard → OPA umzh/authz/gateway, plus request filter injection
+# (umzh-task-requester-inject) on the Task list route.
 #
-#   1. Upstream is the clinical-orders-fhir proxy, not the base HAPI. That proxy
-#      maps /fhir/… → /fhir/clinical-orders/… and strips the partition from
-#      response self-links. So — unlike the sandbox — these routes do NOT carry a
-#      partition-adding proxy-rewrite; the proxy owns partition mapping.
-#   2. The health path is /healthz (the Deployment readiness probe), where the
-#      sandbox uses /__health. Same purpose.
+#   * Upstream is the clinical-orders-fhir proxy, not the base HAPI. That proxy
+#     maps /fhir/… → /fhir/clinical-orders/… and strips the partition from
+#     response self-links, so these routes carry NO partition-adding
+#     proxy-rewrite; the proxy owns partition mapping.
+#   * The health path is /healthz (the Deployment readiness probe).
 routes:
   # ─── Health check — unauthenticated, for the readiness probe ─────────────
   - id: gw-health
@@ -106,9 +103,17 @@ routes:
       type: roundrobin
 
   # ─── Task update — capability-guard (no params, forwards body) + OPA (Rule 1d) ─
+  # Matches /fhir/Task/<id> only, with <id> in FHIR id syntax. OPA checks neither:
+  # HAPI ignores If-Match on a conditional PUT /Task?_id=<id> (no route here),
+  # nothing below a resource is a write target, and OPA builds its fetch URL from
+  # the id.
   - id: ext-task-update
     uri: /fhir/Task/*
     methods: [PUT]
+    vars:
+      - - "uri"
+        - "~~"
+        - "^/fhir/Task/[A-Za-z0-9.-]{1,64}$"
     priority: 10
     plugins:
       openid-connect:
@@ -132,8 +137,9 @@ routes:
   # ─── FHIR read by ID — capability-guard (no params) + OPA consent gate ─
   # The types with a read interaction in the IG CapabilityStatement: those of
   # ext-readonly-search plus Questionnaire, ServiceRequest and Task. Matches
-  # /fhir/<type>/<id> (two path segments). One-segment paths are handled by the
-  # search routes.
+  # /fhir/<type>/<id> (two path segments), with <id> in FHIR id syntax: OPA builds
+  # its fetch URL from the id and doesn't check it. One-segment paths are handled
+  # by the search routes.
   - id: ext-fhir-read
     uris:
       - /fhir/AllergyIntolerance/*
@@ -160,7 +166,7 @@ routes:
     vars:
       - - "uri"
         - "~~"
-        - "^/fhir/[^/]+/[^/]+$"
+        - "^/fhir/[^/]+/[A-Za-z0-9.-]{1,64}$"
     priority: 5
     plugins:
       openid-connect:

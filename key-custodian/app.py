@@ -192,5 +192,5 @@ def token():
 
 
 if __name__ == "__main__":
-    # Flask's dev server is enough for the sandbox; one worker, no autoreload.
+    # Flask's dev server (demo posture, see README); one worker, no autoreload.
     app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False)
